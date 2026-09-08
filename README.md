@@ -1,53 +1,88 @@
 # bac-rnaseq
 
-Bacterial RNAseq pipeline plugin for Claude Code and Codex. Feed raw Illumina
-reads and a reference strain; get standard RNAseq outputs (counts, DESeq2
-results) and publication-style figures. Validated for *Mycobacterium abscessus*
-and *M. tuberculosis*; runs any bacterial genome (FASTA + GFF3). Lab-internal.
+Run a bacterial RNAseq analysis end to end — raw Illumina reads to DESeq2 results
+and figures — in **Codex and Claude Code**. Validated for *Mycobacterium abscessus*
+and *M. tuberculosis*; runs any bacterial genome (FASTA + GFF3).
 
-## Install (Claude Code)
+Developed by [Nicolai Tornow](https://github.com/nicolaitornow). I'm sharing this
+plugin privately with colleagues. **Ask me for repository access and send me your
+GitHub username.**
 
+## Included skills
+
+| Skill | What it does |
+|---|---|
+| **setup-environment** | Builds or locates the analysis environment, confirms a CPU budget, and builds reference bundles (*M. abscessus*, *M. tuberculosis*, or a custom genome). |
+| **run-rnaseq** | Raw FASTQ → QC → trim → align → count → DESeq2, with validated parameters and a machine-readable run report. |
+| **qc-triage** | Per-sample QC gate: alignment rate, assigned-read fraction (a wrong-strandedness detector) and ncRNA fraction. |
+| **visualize-results** | Volcano, TPM bar/heatmap and expression-ranking figures, selected by pathway/operon, locus tags, or top-N/bottom-N genes. |
+| **pathway-enrichment** | Fisher over-representation of functional categories (BH-FDR) with a bubble plot. |
+| **batch-integration** | ComBat/PCA to visualize batch effects across runs (differential expression stays per-batch). |
+| **export-results** | One tidy Excel workbook: summary, per-contrast tables with gene names, plus normalized/VST/TPM. |
+
+## Installation
+
+You need access to this private repository, Git, GitHub CLI, `micromamba` (or conda),
+and Codex or Claude Code. Linux/WSL is tested. Sign in with your own GitHub account
+using `gh auth login`, then run `gh auth setup-git`.
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+codex plugin add bac-rnaseq@nicolai-tornow
 ```
-/plugin marketplace add nicolai-tornow/bac-rnaseq
-/plugin install bac-rnaseq@bac-rnaseq
+
+Browse with `/plugins`. Start a new session after installation.
+
+### Claude Code
+
+```bash
+claude plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+claude plugin install bac-rnaseq@nicolai-tornow
 ```
 
-## Install (Codex)
+Browse with `/plugin`. Start a new session after installation.
 
-Copy or symlink `skills/` into `~/.codex/skills/` (see docs).
+## Run an analysis
 
-## Skills
+1. **Set up once** — `setup-environment` builds the environment and the reference
+   bundle, and asks you to confirm a CPU budget.
+2. **Run** — give `run-rnaseq` a sample sheet
+   (`sample_id, fastq_r1[, fastq_r2], condition[, replicate, batch]`), a reference
+   (`mabs` / `mtb` / `custom`), and one or more contrasts. It produces counts,
+   per-contrast DESeq2 tables, and `00_run_report.json`.
+3. **Figures and tables** — `visualize-results`, `pathway-enrichment` and
+   `export-results` run on any DESeq2 result table; a full run is not required.
 
-- `setup-environment` — build the env + reference bundles, confirm the CPU budget.
-- (later phases: `run-rnaseq`, `qc-triage`, `visualize-results`,
-  `pathway-enrichment`, `batch-integration`, `export-results`)
+Keep data and outputs in their own workspace, outside the plugin installation.
+
+## Quality control has teeth
+
+`run-rnaseq` runs `qc-triage` automatically. **If any sample FAILs QC** (alignment
+below 90%, or an assigned-read fraction that implies the wrong strandedness), the run
+**stops before DESeq2**: it writes the counts and the QC report (`status: "qc_fail"`)
+and exits non-zero, so a contaminated or mis-stranded library can never silently
+produce a differential-expression table. Fix the cause (correct `strandedness`, or
+drop / re-sequence the library) and re-run, or pass `--allow-qc-fail` to proceed
+deliberately. WARN samples proceed but are flagged.
 
 ## Correctness
 
-Pipeline parameters come from the lab's validated pipelines. Load-bearing
-invariants (strandedness, plasmid exclusion, feature counts, seqid
-reconciliation) are enforced at runtime, not just in tests.
+Pipeline parameters come from the lab's validated pipelines; load-bearing invariants
+(reverse-stranded counting, plasmid exclusion, feature counts, seqid reconciliation,
+case-insensitive gene IDs) are enforced at runtime, not just in tests.
 
 ## Verification status
 
-Built and unit/integration-tested on a dev machine (micromamba `deseq` env).
-**Before publishing to labmates, the pipeline must be run once end-to-end on real
-raw reads (planned on boulder).**
+Built and unit/integration-tested (Linux/WSL, micromamba). **Before broad use, run
+once end to end on real raw reads on boulder** — see `docs/BOULDER_RUNBOOK.md`.
+Still to verify there:
 
-**Verified**
-- Reference-bundle building on the real *M. abscessus* + *M. tuberculosis* genomes
-  (Bowtie2 index, SAF, Mtb `H37RvBD`→`NC_018143.2` seqid remap; Mabs = 4970 features).
-- DESeq2 recipe on the real `counts.tsv` (prefilter ≥10, `lfcShrink` normal, α=0.05;
-  produces real differential-expression signal).
-- Stage command parameters via unit tests (reverse-stranded `-s 2`, `--sensitive`,
-  fastp Q20/len36, paired `--countReadPairs`).
-- Orchestration wiring (stage order; `-s 2` reaches featureCounts).
+- [ ] Full raw-FASTQ → counts on real reads, including the strand-correctness gate
+      (`tests/integration/test_correctness_gate.py`, which self-skips without raw FASTQ).
+- [ ] Pinned environment creation from `env/environment.yml` resolves on the target host.
+- [ ] MultiQC aggregation in `qc-triage` on a real run.
+- [ ] Codex install path.
 
-**Still to verify — before publishing (boulder end-to-end run)**
-- [ ] Full raw-FASTQ → trim → align → counts on real reads, including the
-      **strand-correctness gate** (`tests/integration/test_correctness_gate.py`),
-      which self-skips wherever no raw FASTQ are present.
-- [ ] Creation of the pinned environment from `env/environment.yml` on the target
-      host (resolves without version-pin conflicts).
-- [ ] MultiQC aggregation in the `qc-triage` skill on a real run.
-- [ ] Codex install path (`skills/` discoverable under `~/.codex/skills/`).
+Please ask me before redistributing this private package.

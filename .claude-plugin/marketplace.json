@@ -1,6 +1,6 @@
 {
-  "name": "bac-rnaseq",
-  "description": "Lab-internal bacterial RNAseq plugin",
+  "name": "nicolai-tornow",
+  "description": "Nicolai Tornow lab plugin catalog",
   "owner": { "name": "Nicolai Tornow" },
   "plugins": [
     {
