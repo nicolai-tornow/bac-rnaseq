@@ -15,6 +15,10 @@ per `skills/_shared/references/<harness>-tools.md`.
 2. Write a config YAML (spec §7.2) and validate it:
    `python -m engine.python.cli validate <config.yaml>`.
 3. Run: `python -m engine.python.cli run <config.yaml> --work-dir <dir> --samplesheet <tsv> --refs-root <refs>`.
-4. Read `out/<run_name>/00_run_report.json`. If any sample's QC verdict is FAIL,
-   STOP and surface it (do not present the DE as trustworthy) — invoke `qc-triage`
-   to explain. Otherwise report the outputs (counts, per-contrast result tables).
+4. Read `out/<run_name>/00_run_report.json`. **A FAIL halts the run before DESeq2**
+   (`status: "qc_fail"`, CLI exit 1) so bad data cannot silently produce a DE table —
+   only counts + QC are written. Surface the failing sample(s) and reasons (invoke
+   `qc-triage`); the user should fix the cause (e.g. correct `strandedness`, or drop /
+   re-sequence the bad library) and re-run, or pass `--allow-qc-fail` to proceed
+   deliberately. WARN samples proceed but are flagged. On `status: "ok"`, report the
+   outputs (counts, per-contrast result tables).

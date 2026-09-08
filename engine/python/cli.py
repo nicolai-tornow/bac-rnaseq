@@ -44,7 +44,8 @@ def _doctor(args):
 
 def _run(args):
     cfg = load_config(args.config)
-    rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet)
+    rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
+                                  allow_qc_fail=args.allow_qc_fail)
     print(f"run '{rep.get('run_name')}': {rep.get('status')}")
     return 0 if rep.get("status") == "ok" else 1
 
@@ -120,6 +121,8 @@ def main(argv=None):
     rn.add_argument("--work-dir", required=True)
     rn.add_argument("--samplesheet", required=True)
     rn.add_argument("--refs-root", default="refs")
+    rn.add_argument("--allow-qc-fail", dest="allow_qc_fail", action="store_true",
+                    help="proceed to DESeq2 even if a sample FAILs QC (recorded in the run report)")
     rn.set_defaults(fn=_run)
     vz = sub.add_parser("visualize")
     vz.add_argument("results")

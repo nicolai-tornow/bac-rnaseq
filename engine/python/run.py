@@ -43,7 +43,8 @@ def _reshape_counts(fc_txt, out_tsv):
     return out_tsv
 
 
-def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subprocess.run):
+def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subprocess.run,
+                 allow_qc_fail=False):
     work_dir = Path(work_dir)
     out = work_dir / "out" / config.run_name
     for d in ["01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align", "05_counts", "06_deseq"]:
@@ -81,8 +82,21 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subproces
     fc = out / "05_counts" / "featurecounts.txt"
     _check(runner, C.featurecounts_cmd(bundle["saf"], str(fc), bams, threads,
                                        strandedness=strand, paired=paired))
+    _reshape_counts(fc, out / "05_counts" / "counts.tsv")
 
     qc = _collect_qc(align_logs, str(fc) + ".summary", strand)
+    invariants = {"strandedness": strand, "n_features": bundle["n_features"],
+                  "seqids": bundle["seqids"]}
+    params = {"strandedness": strand, "paired": paired, "threads": threads,
+              "allow_qc_fail": allow_qc_fail}
+
+    # QC gate: a FAIL halts before DESeq2 so bad data cannot silently produce a DE table.
+    failed = [sid for sid, v in qc.items() if v.get("verdict") == "FAIL"]
+    if failed and not allow_qc_fail:
+        rep = run_report.build_report(config.run_name, params, qc, invariants, [],
+                                      {"counts": "05_counts/counts.tsv"}, "qc_fail")
+        run_report.write_report(rep, out / "00_run_report.json")
+        return rep
 
     conds = [s.condition for s in samples]
     use_batch = 1 if (config.design.batch_variable and any(s.batch for s in samples)) else 0
@@ -94,16 +108,11 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subproces
     cons = expand_contrasts(config.contrasts.explicit, config.contrasts.all_vs_all, conds)
     ctsv = out / "06_deseq" / "contrasts.tsv"
     ctsv.write_text("".join(f"{c.name}\t{c.numerator}\t{c.denominator}\n" for c in cons))
-    counts = _reshape_counts(fc, out / "05_counts" / "counts.tsv")
     _run_deseq2(runner, Path(__file__).parents[1] / "r" / "deseq2.R",
-                counts, coldata, ctsv, out / "06_deseq", use_batch)
+                out / "05_counts" / "counts.tsv", coldata, ctsv, out / "06_deseq", use_batch)
 
-    invariants = {"strandedness": strand, "n_features": bundle["n_features"],
-                  "seqids": bundle["seqids"]}
     rep = run_report.build_report(
-        config.run_name, {"strandedness": strand, "paired": paired, "threads": threads},
-        qc, invariants, [c.name for c in cons],
-        {"counts": "05_counts/counts.tsv", "deseq": "06_deseq/results"},
-        "ok")
+        config.run_name, params, qc, invariants, [c.name for c in cons],
+        {"counts": "05_counts/counts.tsv", "deseq": "06_deseq/results"}, "ok")
     run_report.write_report(rep, out / "00_run_report.json")
     return rep
