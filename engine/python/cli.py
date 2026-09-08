@@ -78,6 +78,17 @@ def _enrich(args):
     return 0
 
 
+def _batch(args):
+    import pandas as pd
+    from ..python.batch import assert_same_reference, read_common_vst, run_combat
+    assert_same_reference(args.vst)
+    mat = read_common_vst(args.vst)
+    meta = pd.read_csv(args.meta, sep="\t", index_col=0)
+    res = run_combat(mat, meta, args.out_dir)
+    print(f"corrected: {res['corrected']}; PCA: {res['pca_before']}, {res['pca_after']}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -119,6 +130,11 @@ def main(argv=None):
     en.add_argument("--min-size", dest="min_size", type=int, default=2)
     en.add_argument("--max-unmatched", dest="max_unmatched", type=float, default=0.05)
     en.set_defaults(fn=_enrich)
+    bt = sub.add_parser("batch")
+    bt.add_argument("--vst", nargs="+", required=True)
+    bt.add_argument("--meta", required=True)
+    bt.add_argument("--out-dir", dest="out_dir", required=True)
+    bt.set_defaults(fn=_batch)
     args = ap.parse_args(argv)
     return args.fn(args)
 
