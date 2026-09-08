@@ -49,6 +49,16 @@ def _run(args):
     return 0 if rep.get("status") == "ok" else 1
 
 
+def _visualize(args):
+    from ..viz.volcano import load_results, volcano
+    df = load_results(args.results)
+    sel = ({"mode": "genes", "genes": args.genes.split(",")} if args.genes
+           else {"mode": "top", "n": args.top, "by": "l2fc"})
+    pdf, png = volcano(df, args.out, selection=sel)
+    print(f"wrote {pdf}, {png}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -71,6 +81,12 @@ def main(argv=None):
     rn.add_argument("--samplesheet", required=True)
     rn.add_argument("--refs-root", default="refs")
     rn.set_defaults(fn=_run)
+    vz = sub.add_parser("visualize")
+    vz.add_argument("results")
+    vz.add_argument("--out", required=True)
+    vz.add_argument("--top", type=int, default=10)
+    vz.add_argument("--genes")
+    vz.set_defaults(fn=_visualize)
     args = ap.parse_args(argv)
     return args.fn(args)
 
