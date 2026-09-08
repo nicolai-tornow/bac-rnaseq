@@ -89,6 +89,16 @@ def _batch(args):
     return 0
 
 
+def _export(args):
+    from ..python.gene_names import gene_names_from_gff
+    from ..python.export_xlsx import export_workbook
+    gn = gene_names_from_gff(args.gff) if args.gff else {}
+    export_workbook(args.results_dir, args.out, gene_names=gn,
+                    normalized_tsv=args.normalized, vst_tsv=args.vst)
+    print(f"wrote {args.out}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -135,6 +145,13 @@ def main(argv=None):
     bt.add_argument("--meta", required=True)
     bt.add_argument("--out-dir", dest="out_dir", required=True)
     bt.set_defaults(fn=_batch)
+    ex = sub.add_parser("export")
+    ex.add_argument("--results-dir", dest="results_dir", required=True)
+    ex.add_argument("--out", required=True)
+    ex.add_argument("--gff")
+    ex.add_argument("--normalized")
+    ex.add_argument("--vst")
+    ex.set_defaults(fn=_export)
     args = ap.parse_args(argv)
     return args.fn(args)
 
