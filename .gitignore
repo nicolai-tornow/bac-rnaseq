@@ -1,0 +1,14 @@
+# Built reference artifacts (regenerated at setup)
+refs/**/index/
+refs/**/*.fai
+refs/**/*.saf
+refs/**/*.bt2
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+# Work dirs / outputs
+out/
+.bac-rnaseq/
+# OS
+.DS_Store

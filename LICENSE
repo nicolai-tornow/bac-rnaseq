@@ -1,0 +1,28 @@
+bac-rnaseq
+Copyright (c) 2026 Nicolai Tornow. All rights reserved.
+
+This software is source-available. It is NOT open-source software.
+
+PERMITTED without asking:
+  You may download, clone, install and run this software, and modify your
+  own copy, for your own research or internal use. This includes making
+  private copies and forking the repository on GitHub as allowed by
+  GitHub's Terms of Service.
+
+REQUIRES prior written permission from the copyright holder:
+  1. Redistributing, publishing, or sublicensing this software or any
+     modified version, in whole or in part, outside of GitHub's fork
+     feature (for example: re-uploading it to another repository, package
+     index, or website, or bundling it into another tool or plugin).
+  2. Selling it, or using it to provide a commercial product or service.
+
+To request permission, contact the copyright holder via
+https://github.com/nicolaitornow.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS
+USE. RESULTS PRODUCED WITH THIS SOFTWARE ARE THE USER'S RESPONSIBILITY TO
+VERIFY.
