@@ -29,7 +29,7 @@ using `gh auth login`, then run `gh auth setup-git`.
 ### Codex
 
 ```bash
-codex plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+codex plugin marketplace add https://github.com/nicolai-tornow/plugins.git
 codex plugin add bac-rnaseq@nicolai-tornow
 ```
 
@@ -38,7 +38,7 @@ Browse with `/plugins`. Start a new session after installation.
 ### Claude Code
 
 ```bash
-claude plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+claude plugin marketplace add https://github.com/nicolai-tornow/plugins.git
 claude plugin install bac-rnaseq@nicolai-tornow
 ```
 
