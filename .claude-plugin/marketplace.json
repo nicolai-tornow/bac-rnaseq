@@ -1,0 +1,15 @@
+{
+  "name": "bac-rnaseq",
+  "description": "Lab-internal bacterial RNAseq plugin",
+  "owner": { "name": "Nicolai Tornow" },
+  "plugins": [
+    {
+      "name": "bac-rnaseq",
+      "description": "Bacterial RNAseq pipeline plugin (Claude + Codex)",
+      "version": "0.1.0",
+      "source": ".",
+      "author": { "name": "Nicolai Tornow" },
+      "category": "development"
+    }
+  ]
+}
