@@ -25,5 +25,5 @@ def bubble(ora_df, out_stem, top=25, p_col="p", p_thresh=0.05):
     ax.set_yticklabels(df["set"])
     ax.set_xticks([])
     ax.set_xlim(-1, 1)
-    ax.set_title("over-represented sets (bubble area ∝ |log2 OR|)", fontsize=7)
+    ax.set_title("over-represented sets (bubble area scales with |log2 OR|)", fontsize=7)
     return V.save(fig, out_stem)
