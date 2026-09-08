@@ -7,6 +7,7 @@ from .config import load_config
 from .build_refs import build_bundle
 from .coredetect import suggest_threads
 from . import siteconfig
+from . import run as run_module
 
 
 def _validate(args):
@@ -41,6 +42,13 @@ def _doctor(args):
     return 0 if all(tools.values()) else 1
 
 
+def _run(args):
+    cfg = load_config(args.config)
+    rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet)
+    print(f"run '{rep.get('run_name')}': {rep.get('status')}")
+    return 0 if rep.get("status") == "ok" else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -57,6 +65,12 @@ def main(argv=None):
     b.set_defaults(fn=_build_refs)
     d = sub.add_parser("doctor")
     d.set_defaults(fn=_doctor)
+    rn = sub.add_parser("run")
+    rn.add_argument("config")
+    rn.add_argument("--work-dir", required=True)
+    rn.add_argument("--samplesheet", required=True)
+    rn.add_argument("--refs-root", default="refs")
+    rn.set_defaults(fn=_run)
     args = ap.parse_args(argv)
     return args.fn(args)
 
