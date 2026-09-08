@@ -34,10 +34,34 @@ class Resources(BaseModel):
     threads: Optional[int] = None
 
 
+class Contrast(BaseModel):
+    name: str
+    numerator: str
+    denominator: str
+
+
+class Design(BaseModel):
+    variable: Literal["condition"] = "condition"
+    batch_variable: Optional[Literal["batch"]] = None
+
+
+class Contrasts(BaseModel):
+    explicit: list[Contrast] = Field(default_factory=list)
+    all_vs_all: bool = False
+
+
+class Thresholds(BaseModel):
+    padj: float = 0.05
+    log2fc: float = 1.0
+
+
 class Config(BaseModel):
     run_name: str
     reference: Reference
     resources: Resources = Field(default_factory=Resources)
+    design: Design = Field(default_factory=Design)
+    contrasts: Contrasts = Field(default_factory=Contrasts)
+    thresholds: Thresholds = Field(default_factory=Thresholds)
 
 
 def load_config(src) -> Config:
