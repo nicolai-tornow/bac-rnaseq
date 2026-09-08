@@ -59,6 +59,25 @@ def _visualize(args):
     return 0
 
 
+def _enrich(args):
+    from ..viz.volcano import load_results
+    from ..enrichment.genesets import load_genesets, align_hits
+    from ..enrichment.ora import run_ora
+    from ..enrichment.bubble import bubble
+    df = load_results(args.results)
+    sets = load_genesets(args.categories, args.sheet, args.id_col, args.cat_col)
+    geneset_ids = set().union(*sets.values())
+    mapping = align_hits(list(df.index), geneset_ids, max_unmatched=args.max_unmatched)
+    universe = {mapping[g] for g in df.index if g in mapping}
+    hits = {mapping[g] for g in df.index
+            if g in mapping and df.loc[g, "padj"] < args.padj and abs(df.loc[g, "log2FoldChange"]) >= args.log2fc}
+    res = run_ora(hits, sets, universe, alternative=args.alternative, min_size=args.min_size)
+    res.to_csv(args.out + ".tsv", sep="\t", index=False)
+    pdf, png = bubble(res, args.out)
+    print(f"wrote {args.out}.tsv, {pdf}, {png}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -87,6 +106,19 @@ def main(argv=None):
     vz.add_argument("--top", type=int, default=10)
     vz.add_argument("--genes")
     vz.set_defaults(fn=_visualize)
+    en = sub.add_parser("enrich")
+    en.add_argument("results")
+    en.add_argument("--categories", required=True)
+    en.add_argument("--out", required=True)
+    en.add_argument("--sheet", default="2 Gene Annotations")
+    en.add_argument("--id-col", dest="id_col", default="Gene ID")
+    en.add_argument("--cat-col", dest="cat_col", default="Module")
+    en.add_argument("--padj", type=float, default=0.05)
+    en.add_argument("--log2fc", type=float, default=1.0)
+    en.add_argument("--alternative", default="two-sided")
+    en.add_argument("--min-size", dest="min_size", type=int, default=2)
+    en.add_argument("--max-unmatched", dest="max_unmatched", type=float, default=0.05)
+    en.set_defaults(fn=_enrich)
     args = ap.parse_args(argv)
     return args.fn(args)
 
