@@ -1,0 +1,31 @@
+name: bac-rnaseq
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - fastp=1.0.1
+  - fastqc=0.12.1
+  - multiqc=1.32
+  - bowtie2=2.5.4
+  - samtools=1.22.1
+  - subread=2.1.1
+  - r-base=4.3.3
+  - bioconductor-deseq2=1.42.0
+  - bioconductor-apeglm=1.24.0
+  - bioconductor-sva
+  - r-ggplot2
+  - r-pheatmap
+  - pandas>=2.0
+  - numpy>=1.24
+  - scipy>=1.10
+  - statsmodels>=0.14
+  - matplotlib>=3.8
+  - openpyxl>=3.1
+  - biopython>=1.82
+  - pyyaml>=6.0
+  - pydantic>=2.5
+  - pytest>=7.4
+  - pip
+  - pip:
+      - adjustText>=1.3
