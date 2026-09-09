@@ -19,6 +19,7 @@ GitHub username.**
 | **pathway-enrichment** | Fisher over-representation of functional categories (BH-FDR) with a bubble plot. |
 | **batch-integration** | ComBat/PCA to visualize batch effects across runs (differential expression stays per-batch). |
 | **export-results** | One tidy Excel workbook: summary, per-contrast tables with gene names, plus normalized/VST/TPM. |
+| **report-feedback** | File a bug report or suggestion as a GitHub issue on this repo (no separate feedback repo needed). |
 
 ## Installation
 
