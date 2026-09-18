@@ -14,7 +14,7 @@ Consumes a DESeq2 result TSV plus a gene-category sheet. Tool names per
      (sheet `2 Gene Annotations`, id column `Gene ID`, category column `Module`).
    - **M. tuberculosis / custom**: ask the user for an `.xlsx` and its columns.
      If no category sheet exists, say so plainly and stop — there is no bundled one.
-3. Run: `python -m engine.python.cli enrich <results.tsv> --categories <xlsx> --out <stem>`
+3. Run: `${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq enrich <results.tsv> --categories <xlsx> --out <stem>`
    (optionally `--sheet --id-col --cat-col --padj --log2fc --alternative --min-size`).
 4. Gene IDs are matched **case-insensitively**; the run **aborts if >5%** of DE IDs
    fail to match (a sign of wrong ID case/spelling — e.g. upper-casing `*c` genes).

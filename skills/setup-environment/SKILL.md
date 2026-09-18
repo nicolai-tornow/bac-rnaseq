@@ -6,6 +6,7 @@ description: Use FIRST, before running any bac-rnaseq analysis. Creates or locat
 # Setup Environment
 
 Follow these steps. Tool names per `skills/_shared/references/<harness>-tools.md`.
+The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq`; run it with the env's Python.
 
 ## 1. Locate or create the environment
 
@@ -18,20 +19,26 @@ Follow these steps. Tool names per `skills/_shared/references/<harness>-tools.md
 
 ## 2. Confirm the CPU budget
 
-- Run `doctor` (`python -m engine.python.cli doctor`) to detect cores, get a
-  suggested budget (leaves 1-2 free), and check tool presence.
-- ASK the user to confirm or override the suggested thread count; save it to
-  `site.yaml`.
+- Run `bac-rnaseq doctor`: it detects cores, suggests a budget (leaves 1-2 free),
+  shows the saved budget and checks the tools. It does not change anything.
+- ASK the user to confirm or override the suggestion, then save the confirmed value:
+  `bac-rnaseq doctor --save-threads <N>`. Runs use it unless a config sets
+  `resources.threads`.
 
-## 3. Build + verify the reference bundle
+## 3. Reference bundles
 
-- For `mabs`/`mtb`: `... build-refs --species <sp> --refs-root ${CLAUDE_PLUGIN_ROOT}/refs --out <refs_root>/<sp> --threads <T>`.
-- For a custom bacterial genome: pass `--species custom --fasta <FASTA> --gff <GFF3>`.
+- Pick where bundles live and save it: `bac-rnaseq doctor --save-refs-root <dir>`
+  (on a shared host, the shared folder the lab uses). Without it, each work
+  directory builds its own bundle.
+- For `mabs`/`mtb`: `bac-rnaseq build-refs --species <sp> --out <dir>/<sp> --threads <N>`
+  (source files come from the plugin's `refs/`). A later run reuses the bundle as
+  long as its inputs are unchanged.
+- For a custom bacterial genome, the bundle is built on the first run from the
+  config's `reference: {species: custom, fasta: ..., gff: ...}`.
 - VERIFY: the reported feature count is > 0 and every SAF `Chr` is a FASTA
   sequence ID (the builder raises if not). For `mabs`, expect 4970 features.
-- On a shared host, build once into the shared `refs_root`; other users reuse it.
 
 ## 4. Report
 
-- Summarize: env location, confirmed threads, per-species bundle (feature count,
-  seqids, index path). The user is now ready for `run-rnaseq`.
+- Summarize: env location, confirmed threads, bundle folder, and per species the
+  feature count, seqids and index path. The user is now ready for `run-rnaseq`.

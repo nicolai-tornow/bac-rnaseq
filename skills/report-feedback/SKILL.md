@@ -12,7 +12,7 @@ with repo access (i.e. org members) can file. Tool names per
 
 1. Ask the user what kind of feedback (**bug** or **idea**), a one-line summary,
    and any details or steps to reproduce.
-2. Offer to attach environment info from `python -m engine.python.cli doctor`
+2. Offer to attach environment info from `${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq doctor`
    (cores, tool presence) — helpful for bugs. Never include secrets, tokens, or
    private data in the issue.
 3. File it with the user's own GitHub auth:
