@@ -24,12 +24,35 @@ def tool_versions() -> dict:
             "featureCounts": _v("featureCounts", ["-v"])}
 
 
-def build_report(run_name, params, samples_qc, invariants, contrasts, outputs, status):
-    return {"schema_version": "1.0", "run_name": run_name,
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+
+
+def plugin_version() -> dict:
+    """Plugin version from its manifest, plus the git commit when installed from a clone."""
+    info = {"version": None, "commit": None}
+    try:
+        info["version"] = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json")
+                                     .read_text()).get("version")
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(["git", "-C", str(PLUGIN_ROOT), "rev-parse", "HEAD"],
+                             capture_output=True, text=True)
+        if out.returncode == 0:
+            info["commit"] = out.stdout.strip()
+    except Exception:
+        pass
+    return info
+
+
+def build_report(run_name, params, samples_qc, invariants, contrasts, outputs, status,
+                 provenance=None, de_summary=None):
+    return {"schema_version": "1.1", "run_name": run_name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "versions": tool_versions(), "params": params,
-            "samples_qc": samples_qc, "invariants": invariants,
-            "contrasts": contrasts, "outputs": outputs, "status": status}
+            "versions": tool_versions(), "provenance": provenance or {},
+            "params": params, "samples_qc": samples_qc, "invariants": invariants,
+            "contrasts": contrasts, "de_summary": de_summary or {},
+            "outputs": outputs, "status": status}
 
 
 def write_report(report, path):
