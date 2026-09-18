@@ -1,89 +1,219 @@
 # bac-rnaseq
 
-Run a bacterial RNAseq analysis end to end — raw Illumina reads to DESeq2 results
-and figures — in **Codex and Claude Code**. Validated for *Mycobacterium abscessus*
-and *M. tuberculosis*; runs any bacterial genome (FASTA + GFF3).
+A plugin for **Claude Code** and **Codex** that runs a bacterial RNAseq analysis from
+raw Illumina reads to DESeq2 results, with checks that stop a mis-stranded or
+contaminated library from silently producing a differential-expression table.
+Validated for *Mycobacterium abscessus* and *M. tuberculosis*; runs any bacterial
+genome with a FASTA and a GFF3.
 
-Developed by [Nicolai Tornow](https://github.com/nicolaitornow). I'm sharing this
-plugin privately with colleagues. **Ask me for repository access and send me your
-GitHub username.**
+Developed by [Nicolai Tornow](https://github.com/nicolaitornow). Source-available,
+not open source: see [License](#license).
 
-## Included skills
+## What it does
 
 | Skill | What it does |
 |---|---|
-| **setup-environment** | Builds or locates the analysis environment, confirms a CPU budget, and builds reference bundles (*M. abscessus*, *M. tuberculosis*, or a custom genome). |
-| **run-rnaseq** | Raw FASTQ → QC → trim → align → count → DESeq2, with validated parameters and a machine-readable run report. |
-| **qc-triage** | Per-sample QC gate: alignment rate, assigned-read fraction (a wrong-strandedness detector) and ncRNA fraction. |
-| **visualize-results** | Volcano, TPM bar/heatmap and expression-ranking figures, selected by pathway/operon, locus tags, or top-N/bottom-N genes. |
+| **setup-environment** | Creates or finds the analysis environment, confirms a CPU budget, builds reference bundles (*M. abscessus*, *M. tuberculosis*, or a custom genome). |
+| **run-rnaseq** | FASTQ → FastQC → fastp → bowtie2 → featureCounts → QC gate → DESeq2, with a machine-readable run report. |
+| **qc-triage** | Explains the per-sample QC verdicts (alignment, strandedness, assigned fraction, ncRNA fraction) and recommends fixes. |
+| **visualize-results** | Volcano, TPM bar/heatmap and expression-ranking figures, selected by pathway, locus tags, or top/bottom N genes. |
 | **pathway-enrichment** | Fisher over-representation of functional categories (BH-FDR) with a bubble plot. |
-| **batch-integration** | ComBat/PCA to visualize batch effects across runs (differential expression stays per-batch). |
-| **export-results** | One tidy Excel workbook: summary, per-contrast tables with gene names, plus normalized/VST/TPM. |
-| **report-feedback** | File a bug report or suggestion as a GitHub issue on this repo (no separate feedback repo needed). |
+| **batch-integration** | ComBat/PCA to look at batch effects across runs (differential expression stays per batch). |
+| **export-results** | One Excel workbook: summary, per-contrast tables with gene names, normalized/VST/TPM values. |
+| **report-feedback** | Files a bug report or suggestion as a GitHub issue on this repository. |
 
-## Installation
+You talk to the agent ("run RNAseq on these FASTQs, SCFM2 vs 7H9"); the skills tell
+it which commands to run and what to check.
 
-You need access to this private repository, Git, GitHub CLI, `micromamba` (or conda),
-and Codex or Claude Code. Linux/WSL is tested. Sign in with your own GitHub account
-using `gh auth login`, then run `gh auth setup-git`.
+## Install
 
-### Codex
+No GitHub account or credentials are needed. You need `git`, `micromamba` (or
+conda) and Claude Code or Codex. Tested on Linux and WSL.
 
-```bash
-codex plugin marketplace add https://github.com/nicolai-tornow/plugins.git
-codex plugin add bac-rnaseq@nicolai-tornow
-```
-
-Browse with `/plugins`. Start a new session after installation.
-
-### Claude Code
+**Claude Code**
 
 ```bash
-claude plugin marketplace add https://github.com/nicolai-tornow/plugins.git
-claude plugin install bac-rnaseq@nicolai-tornow
+claude plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+claude plugin install bac-rnaseq@bac-rnaseq
 ```
 
-Browse with `/plugin`. Start a new session after installation.
+Start a new session afterwards. Alternatively, without the marketplace:
+
+```bash
+git clone https://github.com/nicolai-tornow/bac-rnaseq.git
+claude --plugin-dir ./bac-rnaseq
+```
+
+**Codex** (not yet tested)
+
+```bash
+codex plugin marketplace add https://github.com/nicolai-tornow/bac-rnaseq.git
+codex plugin add bac-rnaseq@bac-rnaseq
+```
+
+**The analysis environment** is created by the `setup-environment` skill, or by hand:
+
+```bash
+micromamba create -y -n bac-rnaseq -f env/environment.yml
+```
+
+On a shared server, set up one environment and one set of reference bundles for
+everyone: see [docs/BOULDER_RUNBOOK.md](docs/BOULDER_RUNBOOK.md).
 
 ## Run an analysis
 
-1. **Set up once** — `setup-environment` builds the environment and the reference
-   bundle, and asks you to confirm a CPU budget.
-2. **Run** — give `run-rnaseq` a sample sheet
-   (`sample_id, fastq_r1[, fastq_r2], condition[, replicate, batch]`), a reference
-   (`mabs` / `mtb` / `custom`), and one or more contrasts. It produces counts,
-   per-contrast DESeq2 tables, and `00_run_report.json`.
-3. **Figures and tables** — `visualize-results`, `pathway-enrichment` and
-   `export-results` run on any DESeq2 result table; a full run is not required.
+Ask the agent to set up and run, or use the command line directly. The command is
+`bin/bac-rnaseq` in the plugin folder; it works from any directory inside the
+`bac-rnaseq` environment. To type just `bac-rnaseq`:
 
-Keep data and outputs in their own workspace, outside the plugin installation.
+```bash
+micromamba activate bac-rnaseq
+export PATH="/path/to/bac-rnaseq/bin:$PATH"
+```
 
-## Quality control has teeth
+**1. Sample sheet** (tab-separated; `fastq_r2`, `replicate` and `batch` are optional):
 
-`run-rnaseq` runs `qc-triage` automatically. **If any sample FAILs QC** (alignment
-below 90%, or an assigned-read fraction that implies the wrong strandedness), the run
-**stops before DESeq2**: it writes the counts and the QC report (`status: "qc_fail"`)
-and exits non-zero, so a contaminated or mis-stranded library can never silently
-produce a differential-expression table. Fix the cause (correct `strandedness`, or
-drop / re-sequence the library) and re-run, or pass `--allow-qc-fail` to proceed
-deliberately. WARN samples proceed but are flagged.
+```
+sample_id	fastq_r1	fastq_r2	condition
+7H9_rep1	/data/7H9_1_R1.fastq.gz	/data/7H9_1_R2.fastq.gz	7H9
+SCFM2_rep1	/data/SCFM2_1_R1.fastq.gz	/data/SCFM2_1_R2.fastq.gz	SCFM2
+...
+```
 
-## Correctness
+**2. Config** (`config.yaml`). Unknown keys are rejected, so a typo cannot silently
+fall back to a default.
 
-Pipeline parameters come from the lab's validated pipelines; load-bearing invariants
-(reverse-stranded counting, plasmid exclusion, feature counts, seqid reconciliation,
-case-insensitive gene IDs) are enforced at runtime, not just in tests.
+```yaml
+run_name: media
+reference:
+  species: mabs            # mabs | mtb | custom (custom also needs fasta: and gff:)
+  strandedness: reverse    # default; checked on the data during the run
+contrasts:
+  explicit:
+    - {name: SCFM2_vs_7H9, numerator: SCFM2, denominator: 7H9}
+# optional:
+# reads: {layout: mate1_only}      # mixed single/paired-end sheet: run all from read 1
+# design: {batch_variable: batch}  # ~ batch + condition
+# resources: {threads: 8}
+# thresholds: {padj: 0.05, log2fc: 1}
+```
+
+**3. Validate, then run:**
+
+```bash
+bac-rnaseq validate config.yaml --samplesheet samples.tsv
+bac-rnaseq run config.yaml --work-dir . --samplesheet samples.tsv
+```
+
+`validate` catches missing FASTQs, unsafe sample IDs, mixed read layouts and contrast
+levels that are not in the sample sheet, before any work starts.
+
+**4. Outputs** in `out/<run_name>/`:
+
+| Path | Contents |
+|---|---|
+| `00_run_report.json` | Status, per-sample QC, DE gene counts per contrast, tool versions, plugin commit, reference checksums |
+| `00_inputs/` | The config and sample sheet exactly as run |
+| `05_counts/counts.tsv` | Raw counts, GFF genes × samples (the DESeq2 input) |
+| `05_counts/ncrna_counts.tsv` | Counts for structural RNAs the GFF lacks (see below) |
+| `05_counts/strand_check/` | featureCounts at the two other strand settings |
+| `06_deseq/results/<contrast>.tsv` | DESeq2 results (`lfcShrink` normal, alpha 0.05) |
+| `06_deseq/` | Normalized counts, VST, size factors |
+| `qc/multiqc/` | MultiQC over FastQC, fastp, bowtie2 and featureCounts |
+
+**5. Figures and tables:** `visualize-results`, `pathway-enrichment` and
+`export-results` work on any DESeq2 result table, not only on runs made here.
+
+## Quality control
+
+Every run checks each sample and **stops before DESeq2 if any sample FAILs**
+(`status: "qc_fail"`, exit code 1). Counts and QC are still written.
+
+| Check | FAIL | WARN |
+|---|---|---|
+| Alignment rate | < 90% | < 95% |
+| Strandedness | the declared setting is contradicted by the data | declared unstranded on a stranded library |
+| Assigned fraction | — | < 60% while strandedness is confirmed |
+| Structural ncRNA share of assigned reads | — | > 85% |
+
+**Strandedness is measured, not assumed.** Reads are counted at all three
+featureCounts settings (`-s 2` reverse, `-s 1` forward, `-s 0` unstranded). A
+stranded library assigns at least 5x more reads on its own strand. Unstranded
+counting is usually a little *higher* than the correct stranded setting, because
+it also counts antisense reads; that is expected. A low assigned fraction with
+confirmed strandedness means reads fall outside the annotation, which is a WARN, not
+a reason to change the strand setting.
+
+**After a FAIL:** fix the cause and run again, or accept it deliberately with
+`--allow-qc-fail`. Samples whose BAM is complete are not re-trimmed or re-aligned,
+so a re-run only repeats counting and DESeq2.
+
+## Reference bundles and structural RNAs
+
+The bundled genomes use the Rock-lab annotation: *M. abscessus* ATCC 19977
+(`NC_010397.1`, plasmid excluded, 4,970 features) and *M. tuberculosis* H37Rv.
+
+Total-RNA libraries contain abundant structural RNAs even after rRNA depletion.
+The *M. abscessus* GFF lacks four of them: Ms1 RNA, tmRNA, RNase P RNA and 4.5S SRP
+RNA. In one public dataset they took most of the reads, which then looked like a
+strandedness problem. The bundles add these RNAs (called with Rfam/Infernal and
+Aragorn; coordinates and evidence in [refs/README.md](refs/README.md)), so their reads
+are counted and reported in `ncrna_counts.tsv`. They are **kept out of the DESeq2
+matrix**, which stays the GFF gene set, so new count tables line up row for row with
+tables from earlier runs of this pipeline. Reads overlapping both a structural RNA
+and a gene are counted for neither.
+
+For a custom genome, pass `reference.structural_rna: <table>` in the same format;
+otherwise GFF genes with an rRNA, tRNA, tmRNA or ncRNA `gene_biotype` are used for
+the ncRNA share.
+
+Bundles are built once and reused while their inputs are unchanged. Save a shared
+location with `bac-rnaseq doctor --save-refs-root <dir>`.
+
+## Things to know
+
+- **Gene IDs keep the GFF's case** (`MAB0001`, `MAB3648`). Some earlier tables from
+  the Rock lab use lowercase tags (`mab0001`). Gene matching in enrichment is
+  case-insensitive; when you join tables yourself, normalize the case first.
+- **Strains other than the reference.** Reads from *M. abscessus* subsp.
+  *massiliense* or *bolletii* can be run against the ATCC 19977 bundle, but genes
+  the strain has and ATCC 19977 lacks are invisible, and the alignment rate is lower
+  (it may FAIL the 90% gate for that reason alone). Read the alignment rate with
+  that in mind, and treat genes with zero counts in every sample as possibly absent.
+- **Mixed read layouts** are rejected by default. `reads: {layout: mate1_only}` runs
+  every sample single-end from read 1, so layout is not confounded with condition.
+- **Threads:** `resources.threads` in the config, else the budget saved with
+  `bac-rnaseq doctor --save-threads N`, else 4.
+
+## Tests
+
+```bash
+python -m pytest tests -q
+```
+
+The suite includes a full run on real reads: 20,000 read pairs of a public
+reverse-stranded *M. abscessus* library bundled in `tests/fixtures/`. Tests that need
+unpublished lab data skip unless `BAC_RNASEQ_TESTDATA` points at it.
 
 ## Verification status
 
-Built and unit/integration-tested (Linux/WSL, micromamba). **Before broad use, run
-once end to end on real raw reads on boulder** — see `docs/BOULDER_RUNBOOK.md`.
-Still to verify there:
-
-- [ ] Full raw-FASTQ → counts on real reads, including the strand-correctness gate
-      (`tests/integration/test_correctness_gate.py`, which self-skips without raw FASTQ).
-- [ ] Pinned environment creation from `env/environment.yml` resolves on the target host.
-- [ ] MultiQC aggregation in `qc-triage` on a real run.
+- [x] Pinned environment from `env/environment.yml` resolves on boulder
+      (DESeq2 1.42.0, R 4.3.3).
+- [x] Raw FASTQ → counts on real reads, including the strand-correctness gate, run
+      on the bundled public fixture (Linux/WSL).
+- [x] MultiQC over a real run (bundled fixture).
+- [ ] A full-size run on boulder with this version.
 - [ ] Codex install path.
 
-Please ask me before redistributing this private package.
+## Feedback
+
+Open an issue on this repository, or ask the agent to use the `report-feedback`
+skill.
+
+## License
+
+Copyright (c) 2026 Nicolai Tornow. Source-available, **not** open source. You may
+download, install, run and modify this software for your own research or internal
+use, including private copies and GitHub forks. Redistributing it (or a modified
+version) outside GitHub's fork feature, or using it commercially, needs written
+permission. The full terms are in [LICENSE](LICENSE).
