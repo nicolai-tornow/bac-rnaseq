@@ -94,7 +94,7 @@ contrasts:
 # optional:
 # reads: {layout: mate1_only}      # mixed single/paired-end sheet: run all from read 1
 # design: {batch_variable: batch}  # ~ batch + condition
-# resources: {threads: 8}
+# resources: {threads: 32, parallel_samples: 4}   # default: one sample per 8 threads
 # thresholds: {padj: 0.05, log2fc: 1}
 ```
 
@@ -182,8 +182,11 @@ location with `bac-rnaseq doctor --save-refs-root <dir>`.
   that in mind, and treat genes with zero counts in every sample as possibly absent.
 - **Mixed read layouts** are rejected by default. `reads: {layout: mate1_only}` runs
   every sample single-end from read 1, so layout is not confounded with condition.
-- **Threads:** `resources.threads` in the config, else the budget saved with
-  `bac-rnaseq doctor --save-threads N`, else 4.
+- **Threads and parallel samples:** the budget is `resources.threads` in the config,
+  else the one saved with `bac-rnaseq doctor --save-threads N`, else 4. Samples are
+  trimmed and aligned several at a time: by default one per 8 threads (32 threads →
+  4 samples × 8), or `resources.parallel_samples` / `doctor --save-parallel P`.
+  Budget about 2 GB of memory per parallel sample.
 
 ## Tests
 

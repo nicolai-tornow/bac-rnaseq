@@ -59,7 +59,7 @@ a clear message if the shared bundle is out of date and read-only for them.
 cd "$SHARED/bac-rnaseq" && python -m pytest tests -q
 ```
 
-Expect every test to pass except those that need lab data: 76 passed, 5 skipped.
+Expect every test to pass except those that need lab data: 79 passed, 5 skipped.
 The strand-correctness gate and a full end-to-end run use the bundled read fixture
 (`tests/fixtures/`), so they run here. To include the lab-data tests, set
 `BAC_RNASEQ_TESTDATA` to a folder that contains `rnaseq_mabs_media/`.

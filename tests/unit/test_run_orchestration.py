@@ -27,7 +27,8 @@ def _setup(tmp_path, monkeypatch, qc=None, sheet=PE):
         "n_features": 4970, "seqids": ["NC_010397.1"], "fasta": "x", "gene_ids": [],
         "extra_ids": [], "structural": {}})
     monkeypatch.setattr(R, "_process_sample",
-                        lambda s, paired, *a, **k: processed.append((s, paired)) or {})
+                        lambda s, paired, out, bundle, threads, runner:
+                        processed.append((s, paired, threads)) or {})
     monkeypatch.setattr(R, "_strand_check", lambda *a, **k: {})
     monkeypatch.setattr(R, "_ncrna_fracs", lambda *a, **k: {})
     monkeypatch.setattr(R, "_reshape_counts", lambda *a, **k: None)
@@ -90,7 +91,7 @@ def test_mate1_only_runs_mixed_sheet_single_end(tmp_path, monkeypatch):
         R.run_pipeline(_cfg(), tmp_path, tmp_path, str(ss), runner=runner, check_files=False)
     R.run_pipeline(_cfg(reads={"layout": "mate1_only"}), tmp_path, tmp_path, str(ss),
                    runner=runner, check_files=False)
-    assert all(paired is False and s.fastq_r2 is None for s, paired in processed)
+    assert all(paired is False and s.fastq_r2 is None for s, paired, _ in processed)
     fc = [c for c in calls if c and c[0] == "featureCounts"][0]
     assert "-p" not in fc
 
@@ -103,3 +104,25 @@ def test_contrast_typo_fails_before_any_work(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="SCFM"):
         R.run_pipeline(cfg, tmp_path, tmp_path, str(ss), runner=runner, check_files=False)
     assert calls == []
+
+
+SIX = "sample_id\tfastq_r1\tcondition\n" + "".join(
+    f"s{i}\tA{i}.fq.gz\t{'7H9' if i < 3 else 'SCFM2'}\n" for i in range(6))
+
+
+def test_default_runs_one_sample_per_8_threads(tmp_path, monkeypatch):
+    ss, runner, _, _, processed = _setup(tmp_path, monkeypatch, sheet=SIX)
+    rep = R.run_pipeline(_cfg(resources={"threads": 32}), tmp_path, tmp_path, str(ss),
+                         runner=runner, check_files=False)
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (4, 8)
+    assert {t for *_, t in processed} == {8} and len(processed) == 6
+
+
+def test_parallel_samples_override_and_small_budget(tmp_path, monkeypatch):
+    ss, runner, _, _, _ = _setup(tmp_path, monkeypatch, sheet=SIX)
+    rep = R.run_pipeline(_cfg(resources={"threads": 32, "parallel_samples": 2}), tmp_path,
+                         tmp_path, str(ss), runner=runner, check_files=False)
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (2, 16)
+    rep = R.run_pipeline(_cfg(resources={"threads": 6}), tmp_path, tmp_path, str(ss),
+                         runner=runner, check_files=False)
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (1, 6)

@@ -50,9 +50,11 @@ def _build_refs(args):
 def _doctor(args):
     """Report cores and tools. Only --save-threads / --save-refs-root write site.yaml."""
     site = siteconfig.read_site()
-    if args.save_threads or args.save_refs_root:
+    if args.save_threads or args.save_refs_root or args.save_parallel:
         if args.save_threads:
             site["threads"] = args.save_threads
+        if args.save_parallel:
+            site["parallel_samples"] = args.save_parallel
         if args.save_refs_root:
             site["refs_root"] = str(os.path.abspath(args.save_refs_root))
         print(f"saved to {siteconfig.write_site(site)}: {site}")
@@ -63,6 +65,9 @@ def _doctor(args):
              ["fastp", "fastqc", "bowtie2", "samtools", "featureCounts", "multiqc", "Rscript"]}
     print(f"cores detected: {total}; suggested budget: {sug}; "
           f"saved budget: {site.get('threads', 'none')}")
+    budget = site.get("threads") or sug
+    print(f"samples in parallel: {site.get('parallel_samples') or max(1, budget // 8)} "
+          f"({'saved' if site.get('parallel_samples') else 'default: 8 threads per sample'})")
     print(f"reference bundles: {site.get('refs_root', 'none saved (built per work dir)')}")
     for t, p in tools.items():
         print(f"  {t}: {'OK' if p else 'MISSING'}")
@@ -145,6 +150,8 @@ def main(argv=None):
     d = sub.add_parser("doctor")
     d.add_argument("--save-threads", dest="save_threads", type=int,
                    help="save the confirmed thread budget to site.yaml")
+    d.add_argument("--save-parallel", dest="save_parallel", type=int,
+                   help="save how many samples to trim/align at once")
     d.add_argument("--save-refs-root", dest="save_refs_root",
                    help="save the folder where reference bundles are built and reused")
     d.set_defaults(fn=_doctor)

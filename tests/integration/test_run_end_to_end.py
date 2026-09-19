@@ -36,13 +36,14 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(R, "_run_deseq2", lambda *a, **k: deseq.append(a))
     ss = _split_fixture(tmp_path)
     cfg = load_config({"run_name": "e2e", "reference": {"species": "mabs"},
-                       "resources": {"threads": 2},
+                       "resources": {"threads": 8, "parallel_samples": 4},
                        "contrasts": {"explicit": [{"name": "B_vs_A", "numerator": "B",
                                                    "denominator": "A"}]}})
     rep = R.run_pipeline(cfg, tmp_path, None, ss)
     out = tmp_path / "out" / "e2e"
 
     assert rep["status"] == "ok" and deseq
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (4, 2)
     for sid, v in rep["samples_qc"].items():
         assert v["strandedness"]["inferred"] == "reverse", sid
         assert v["verdict"] == "PASS", (sid, v["reasons"])

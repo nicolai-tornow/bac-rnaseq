@@ -41,7 +41,8 @@ class Reference(_Strict):
 
 
 class Resources(_Strict):
-    threads: Optional[int] = None
+    threads: Optional[int] = None           # total budget for the run
+    parallel_samples: Optional[int] = None  # samples trimmed/aligned at once
 
 
 class Reads(_Strict):

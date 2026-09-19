@@ -3,6 +3,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import yaml
 from .samplesheet import read_samplesheet, is_paired, apply_layout, check_samplesheet
@@ -12,6 +13,8 @@ from . import commands as C
 from . import qc_triage, run_report, siteconfig
 
 STRANDS = ("reverse", "forward", "unstranded")
+CORES_PER_SAMPLE = 8      # default split of the thread budget across parallel samples
+SORT_MEM = "256M"         # samtools sort memory per thread (4 x 8 threads ~ 8 GB)
 
 
 def _check(runner, cmd, **kw):
@@ -28,6 +31,14 @@ def _run_deseq2(runner, r_script, counts, coldata, contrasts_tsv, out_dir, use_b
 
 def _threads(config) -> int:
     return config.resources.threads or siteconfig.read_site().get("threads") or 4
+
+
+def _parallelism(config, total, n_samples):
+    """(samples at once, threads per sample). Default: one sample per 8 threads."""
+    par = (config.resources.parallel_samples or siteconfig.read_site().get("parallel_samples")
+           or max(1, total // CORES_PER_SAMPLE))
+    par = max(1, min(par, n_samples))
+    return par, max(1, total // par)
 
 
 def _bundle_dir(config, work_dir) -> Path:
@@ -81,7 +92,8 @@ def _process_sample(s, paired, out, bundle, threads, runner):
     Path(log).write_text(getattr(res, "stderr", "") or "")
     if getattr(res, "returncode", 0) != 0:
         raise RuntimeError(f"stage failed: bowtie2 ({s.sample_id}); see {log}")
-    _check(runner, ["samtools", "sort", "-@", str(threads), "-o", str(bam), str(sam)])
+    _check(runner, ["samtools", "sort", "-@", str(threads), "-m", SORT_MEM,
+                    "-o", str(bam), str(sam)])
     _check(runner, ["samtools", "index", str(bam)])
     _check(runner, ["samtools", "quickcheck", str(bam)])
     sam.unlink(missing_ok=True)
@@ -206,11 +218,15 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subproces
     fastqs = [f for s in samples for f in (s.fastq_r1, s.fastq_r2) if f]
     _check(runner, C.fastqc_cmd(fastqs, str(out / "01_qc_raw"), threads))
 
-    align_logs, bams, reads = {}, [], {}
-    for s in samples:
-        reads[s.sample_id] = _process_sample(s, paired, out, bundle, threads, runner)
-        align_logs[s.sample_id] = str(out / "04_align" / f"{s.sample_id}.bowtie2.log")
-        bams.append(str(out / "04_align" / f"{s.sample_id}.bam"))
+    # Trim + align several samples at once, splitting the thread budget.
+    par, per_sample = _parallelism(config, threads, len(samples))
+    with ThreadPoolExecutor(max_workers=par) as pool:
+        futures = {s.sample_id: pool.submit(_process_sample, s, paired, out, bundle,
+                                            per_sample, runner) for s in samples}
+        reads = {sid: f.result() for sid, f in futures.items()}   # re-raises a failure
+    align_logs = {s.sample_id: str(out / "04_align" / f"{s.sample_id}.bowtie2.log")
+                  for s in samples}
+    bams = [str(out / "04_align" / f"{s.sample_id}.bam") for s in samples]
     trimmed = sorted(str(p) for p in (out / "02_trimmed").glob("*.fq.gz"))
     if trimmed:
         _check(runner, C.fastqc_cmd(trimmed, str(out / "03_qc_trimmed"), threads))
@@ -232,7 +248,8 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subproces
                   "seqids": bundle["seqids"],
                   "structural_rnas_added": bundle.get("extra_ids", [])}
     params = {"strandedness": strand, "paired": paired, "layout": config.reads.layout,
-              "threads": threads, "allow_qc_fail": allow_qc_fail}
+              "threads": threads, "parallel_samples": par,
+              "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail}
     provenance = {"plugin": run_report.plugin_version(),
                   "inputs": {"config": "00_inputs/config.yaml",
                              "samplesheet": "00_inputs/samplesheet.tsv"},
