@@ -6,8 +6,8 @@ contaminated library from silently producing a differential-expression table.
 Validated for *Mycobacterium abscessus* and *M. tuberculosis*; runs any bacterial
 genome with a FASTA and a GFF3.
 
-Developed by [Nicolai Tornow](https://github.com/nicolaitornow). Source-available,
-not open source: see [License](#license).
+Developed by [Nicolai Tornow](https://github.com/nicolaitornow). Open source under the
+GNU GPL v3: see [License](#license).
 
 ## What it does
 
@@ -207,8 +207,14 @@ skill.
 
 ## License
 
-Copyright (c) 2026 Nicolai Tornow. Source-available, **not** open source. You may
-download, install, run and modify this software for your own research or internal
-use, including private copies and GitHub forks. Redistributing it (or a modified
-version) outside GitHub's fork feature, or using it commercially, needs written
-permission. The full terms are in [LICENSE](LICENSE).
+Copyright (C) 2026 Nicolai Tornow.
+
+bac-rnaseq is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License, version 3, as published by the Free Software
+Foundation. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full terms.
+
+In short: you may use, study, modify and share it. Anything you distribute that is
+based on it must also be released under GPL-3.0, with its source code and this
+copyright notice.
