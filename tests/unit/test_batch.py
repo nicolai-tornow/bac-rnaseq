@@ -18,3 +18,14 @@ def test_diff_reference_raises(tmp_path):
     pd.DataFrame({"s2": [4, 5]}, index=["x1", "x2"]).to_csv(b, sep="\t")
     with pytest.raises(ValueError):
         assert_same_reference([str(a), str(b)])
+
+
+def test_common_genes_case_insensitive(tmp_path):
+    # One run written with upper-case locus tags, another with lower-case.
+    a, b = tmp_path / "a.tsv", tmp_path / "b.tsv"
+    pd.DataFrame({"s1": [1, 2, 3]}, index=["MAB0001", "MAB0002c", "MAB0003"]).to_csv(a, sep="\t")
+    pd.DataFrame({"s2": [4, 5]}, index=["mab0002c", "mab0003"]).to_csv(b, sep="\t")
+    assert_same_reference([str(a), str(a)])
+    mat = read_common_vst([str(a), str(b)])
+    assert list(mat.index) == ["MAB0002c", "MAB0003"]      # first input's spelling
+    assert mat.loc["MAB0002c", "s2"] == 4

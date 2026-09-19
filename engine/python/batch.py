@@ -2,21 +2,28 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 import pandas as pd
+from .ids import normalize_id
 
 
 def read_common_vst(paths):
+    """Genes present in every input, matched case-insensitively (MAB0001 = mab0001).
+    The output keeps the first input's spelling of each ID."""
     dfs = [pd.read_csv(p, sep="\t", index_col=0) for p in paths]
-    common = set(dfs[0].index)
-    for d in dfs[1:]:
-        common &= set(d.index)
+    maps = [{normalize_id(str(g)): g for g in d.index} for d in dfs]
+    common = set(maps[0])
+    for m in maps[1:]:
+        common &= set(m)
     if not common:
         raise ValueError("no genes common to all VST inputs — different references?")
     common = sorted(common)
-    return pd.concat([d.loc[common] for d in dfs], axis=1)
+    parts = [d.loc[[m[k] for k in common]].set_axis([maps[0][k] for k in common])
+             for d, m in zip(dfs, maps)]
+    return pd.concat(parts, axis=1)
 
 
 def assert_same_reference(paths, min_overlap=0.95):
-    sets = [set(pd.read_csv(p, sep="\t", index_col=0).index) for p in paths]
+    sets = [{normalize_id(str(g)) for g in pd.read_csv(p, sep="\t", index_col=0).index}
+            for p in paths]
     base = sets[0]
     for s in sets[1:]:
         overlap = len(base & s) / max(len(base | s), 1)
