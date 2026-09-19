@@ -5,6 +5,6 @@
   "author": { "name": "Nicolai Tornow" },
   "homepage": "https://github.com/nicolai-tornow/bac-rnaseq",
   "repository": "https://github.com/nicolai-tornow/bac-rnaseq",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "GPL-3.0-only",
   "keywords": ["rnaseq", "bioinformatics", "deseq2", "mycobacterium", "bacterial-genomics"]
 }

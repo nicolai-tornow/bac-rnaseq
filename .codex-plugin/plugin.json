@@ -4,7 +4,7 @@
   "description": "Bacterial RNAseq pipeline plugin for Codex CLI.",
   "author": { "name": "Nicolai Tornow" },
   "homepage": "https://github.com/nicolai-tornow/bac-rnaseq",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "GPL-3.0-only",
   "skills": "./skills/",
   "hooks": {},
   "interface": {
