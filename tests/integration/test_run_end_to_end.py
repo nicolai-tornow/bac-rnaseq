@@ -46,6 +46,8 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     for sid, v in rep["samples_qc"].items():
         assert v["strandedness"]["inferred"] == "reverse", sid
         assert v["verdict"] == "PASS", (sid, v["reasons"])
+        by = v["ncrna_by_class"]                       # depletion vs biology, kept apart
+        assert by["Ms1_RNA"] > 0.05 and by["tmRNA"] > 0.05 and "rRNA" in by
         assert rep["provenance"]["reads"][sid]["reads_in"] == 10000   # fastp read everything
 
     counts = (out / "05_counts/counts.tsv").read_text().splitlines()

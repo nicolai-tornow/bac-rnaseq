@@ -134,7 +134,7 @@ Every run checks each sample and **stops before DESeq2 if any sample FAILs**
 | Alignment rate | < 90% | < 95% |
 | Strandedness | the declared setting is contradicted by the data | declared unstranded on a stranded library |
 | Assigned fraction | — | < 60% while strandedness is confirmed |
-| Structural ncRNA share of assigned reads | — | > 85% |
+| Structural ncRNA share of assigned reads | — | > 85% (reported per class: rRNA, tRNA, tmRNA, RNase P, Ms1, SRP) |
 
 **Strandedness is measured, not assumed.** Reads are counted at all three
 featureCounts settings (`-s 2` reverse, `-s 1` forward, `-s 0` unstranded). A
@@ -202,7 +202,13 @@ unpublished lab data skip unless `BAC_RNASEQ_TESTDATA` points at it.
 - [x] Raw FASTQ → counts on real reads, including the strand-correctness gate, run
       on the bundled public fixture (Linux/WSL).
 - [x] MultiQC over a real run (bundled fixture).
-- [ ] A full-size run on boulder with this version.
+- [x] A full-size real dataset on boulder (0.1.0 plus manual QC workarounds): the
+      public *M. abscessus* subsp. *massiliense* 1239 RNAseq (PRJNA602697; 9 libraries,
+      7H9 / SCFM2 / CF sputum). It reproduces the published DE tables (Pearson r
+      0.935-0.960, 92-98% same direction, all five qRT-PCR genes agree), and a
+      mate-1-only run agrees with the paired-end run at r = 0.989. The QC problems it
+      exposed are what 0.2.0 fixes.
+- [ ] A full-size run on boulder with 0.2.0.
 - [ ] Codex install path.
 
 ## Feedback

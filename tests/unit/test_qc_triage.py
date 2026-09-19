@@ -50,11 +50,26 @@ def test_declared_unstranded_on_stranded_library_warns():
     assert s["verdict"] == "WARN"
 
 
-def test_ncrna_fractions_per_sample():
+def test_ncrna_fractions_per_sample_and_class():
+    # Same total, different cause: poor rRNA depletion (a) vs abundant Ms1 (b).
     counts = pd.DataFrame({"a": [90, 10, 0], "b": [10, 10, 80]},
                           index=["MABr5051", "MAB0001", "MABnc_ms1"])
-    f = ncrna_fractions(counts, {"MABr5051", "MABnc_ms1"})
-    assert f == {"a": 0.9, "b": 0.9}
+    f = ncrna_fractions(counts, {"MABr5051": "rRNA", "MABnc_ms1": "Ms1_RNA"})
+    assert f["a"]["total"] == f["b"]["total"] == 0.9
+    assert f["a"]["by_class"] == {"Ms1_RNA": 0.0, "rRNA": 0.9}
+    assert f["b"]["by_class"] == {"Ms1_RNA": 0.8, "rRNA": 0.1}
+
+
+# Boulder, full Jackson 1239 run (2026-09-18), assigned fraction before the
+# structural RNAs were counted: -s 2 vs -s 1 was 51-55% vs 3.4-4.0% (7H9/SCFM2)
+# and 17-20% vs 1.6-1.9% (CF sputum). Both are correctly reverse-stranded.
+def test_full_run_numbers_confirm_reverse():
+    for rev, fwd, uns in ((0.51, 0.040, 0.53), (0.17, 0.019, 0.18)):
+        s = infer_strandedness({"reverse": rev, "forward": fwd, "unstranded": uns}, "reverse")
+        assert s["inferred"] == "reverse" and s["verdict"] == "PASS"
+        v = triage_sample(96.0, rev, 0.05, strand=s)
+        assert v["verdict"] == "WARN"                       # not FAIL, no strand advice
+        assert not any("strandedness:" in r for r in v["reasons"])
 
 
 def test_triage_pass():

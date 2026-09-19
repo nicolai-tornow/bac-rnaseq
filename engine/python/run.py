@@ -137,20 +137,22 @@ def _collect_qc(align_logs, fc_summary, strand_fracs, ncrna, declared):
     for sid, log in align_logs.items():
         pct = qc_triage.parse_bowtie2_log(Path(log).read_text())
         strand = qc_triage.infer_strandedness(strand_fracs[sid], declared)
-        v = qc_triage.triage_sample(pct, fc[sid]["assigned_frac"], ncrna.get(sid, 0.0),
+        nc = ncrna.get(sid, {"total": 0.0, "by_class": {}})
+        v = qc_triage.triage_sample(pct, fc[sid]["assigned_frac"], nc["total"],
                                     strand=strand, nofeature_frac=fc[sid]["nofeature_frac"])
         v.update({"alignment_pct": pct, "assigned_frac": fc[sid]["assigned_frac"],
                   "nofeature_frac": fc[sid]["nofeature_frac"],
-                  "ncrna_frac": ncrna.get(sid, 0.0), "strandedness": strand})
+                  "ncrna_frac": nc["total"], "ncrna_by_class": nc["by_class"],
+                  "strandedness": strand})
         out[sid] = v
     return out
 
 
-def _ncrna_fracs(fc_txt, structural_ids):
+def _ncrna_fracs(fc_txt, structural_classes):
     import pandas as pd
     df = pd.read_csv(fc_txt, sep="\t", comment="#", index_col=0).iloc[:, 5:]
     df.columns = [qc_triage.sample_name(c) for c in df.columns]
-    return qc_triage.ncrna_fractions(df, structural_ids)
+    return qc_triage.ncrna_fractions(df, structural_classes)
 
 
 def _de_summary(results_dir, contrasts, padj, log2fc):
@@ -222,7 +224,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subproces
     strand_fracs = _strand_check(runner, bundle["saf"], bams, threads, paired,
                                  out / "05_counts" / "strand_check", strand,
                                  str(fc) + ".summary")
-    ncrna = _ncrna_fracs(fc, set(bundle.get("structural", {})))
+    ncrna = _ncrna_fracs(fc, bundle.get("structural", {}))
     qc = _collect_qc(align_logs, str(fc) + ".summary", strand_fracs, ncrna, strand)
     _check(runner, C.multiqc_cmd(str(out), str(out / "qc" / "multiqc")))
 

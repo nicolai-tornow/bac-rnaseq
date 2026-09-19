@@ -75,13 +75,25 @@ def infer_strandedness(fracs: dict, declared: str) -> dict:
             "verdict": verdict, "message": msg}
 
 
-def ncrna_fractions(counts_df, ncrna_ids) -> dict:
-    """Per sample: share of assigned reads on structural RNAs (rRNA, tRNA, tmRNA, ...)."""
-    ids = counts_df.index.intersection(list(ncrna_ids))
+def ncrna_fractions(counts_df, ncrna_classes) -> dict:
+    """Per sample: share of assigned reads on structural RNAs, in total and by class.
+
+    ncrna_classes maps gene ID -> class (rRNA, tRNA, tmRNA, Ms1_RNA, ...). Keeping the
+    classes apart matters: rRNA+tRNA measures depletion efficiency, whereas Ms1,
+    tmRNA and RNase P RNA are abundant by biology and can dominate a library.
+    """
+    if not isinstance(ncrna_classes, dict):
+        ncrna_classes = {i: "ncRNA" for i in ncrna_classes}
+    ids = counts_df.index.intersection(list(ncrna_classes))
     out = {}
     for col in counts_df.columns:
         tot = counts_df[col].sum()
-        out[col] = float(counts_df.loc[ids, col].sum() / tot) if tot else 0.0
+        by = {}
+        for gid in ids:
+            c = ncrna_classes[gid]
+            by[c] = by.get(c, 0) + counts_df.at[gid, col]
+        out[col] = {"total": float(sum(by.values()) / tot) if tot else 0.0,
+                    "by_class": {c: float(n / tot) if tot else 0.0 for c, n in sorted(by.items())}}
     return out
 
 

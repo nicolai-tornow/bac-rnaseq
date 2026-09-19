@@ -10,7 +10,7 @@ right after a run or later on a finished run directory.
 
 1. Read `out/<run>/00_run_report.json` → `samples_qc`. For each sample it holds
    `verdict`, `reasons`, `alignment_pct`, `assigned_frac`, `nofeature_frac`,
-   `ncrna_frac` and `strandedness` (assigned fraction at reverse `-s 2`,
+   `ncrna_frac`, `ncrna_by_class` and `strandedness` (assigned fraction at reverse `-s 2`,
    forward `-s 1`, unstranded `-s 0`, plus the inferred setting).
    The MultiQC report is at `out/<run>/qc/multiqc/multiqc_report.html`.
 2. Rules:
@@ -29,6 +29,11 @@ right after a run or later on a finished run directory.
      GFF (check `ncrna_counts.tsv` and the NoFeatures share).
    - **Low alignment:** contamination, or a strain that differs from the reference.
      The user decides whether to re-run with `--allow-qc-fail`.
-   - **High ncRNA:** poor rRNA depletion; the sample has little usable mRNA depth.
+   - **High ncRNA:** little usable mRNA depth. Use `ncrna_by_class` to tell why:
+     rRNA+tRNA measures depletion efficiency, while Ms1, tmRNA and RNase P RNA are
+     abundant by biology (in CF sputum they can exceed 75% of reads).
+   - Always compare `ncrna_by_class` across replicates: one replicate with a much
+     higher rRNA+tRNA share (e.g. 20% vs < 1%) was depleted less well, even when no
+     rule fires.
 4. A re-run reuses trimmed reads and BAMs, so fixing a setting only repeats counting
    and DESeq2.
