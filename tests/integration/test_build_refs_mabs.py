@@ -65,3 +65,12 @@ def test_custom_bundle_honours_exclude_and_feature_types(tmp_path):
     res = build_bundle("custom", out_dir=tmp_path / "b", threads=1, fasta=fa, gff=gff,
                        feature_types=("CDS",), exclude_seqids=["plasmid"])
     assert res["gene_ids"] == ["G1", "G2"] and res["seqids"] == ["chr"]
+
+
+def test_mtb_tmrna_on_minus_strand(tmp_path):
+    # Rfam RF00023 and Aragorn both place H37Rv tmRNA (ssr) on the minus strand.
+    res = build_bundle("mtb", refs_root=REPO / "refs", out_dir=tmp_path, threads=2)
+    row = [l.split("\t") for l in Path(res["saf"]).read_text().splitlines()
+           if l.startswith("ssr\t")]
+    assert row and row[0][4] == "-"
+    assert res["structural"]["RVBDnc_ms1"] == "Ms1_RNA"

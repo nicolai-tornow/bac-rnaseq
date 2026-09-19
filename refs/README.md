@@ -44,8 +44,13 @@ and tmRNA was confirmed with Aragorn `-m`:
 | mtb | RVBDnc_ms1 | Ms1 RNA (MTS2823) | 4,100,862-4,101,163 + | RF02566, score 227.8 |
 
 For mtb, the same scan reproduces the GFF's `rnpB`, `ssr` and `4.5S` to the base,
-so those are listed as `in_gff = yes`. The GFF places `ssr` (tmRNA) on the `+`
-strand, but Rfam and Aragorn both place it on `-`.
+so those are listed as `in_gff = yes`.
+
+**Correction to the bundled mtb GFF (2026-09-18):** `ssr` (tmRNA, 3,467,964-3,468,331)
+was annotated on the `+` strand. Rfam (RF00023, score 133.6) and Aragorn (`-m`,
+c[3467965,3468331]) both place it on `-`, and with reverse-stranded counting the
+`+` feature missed the tmRNA reads. The strand was changed to `-`; this is the only
+edit to the original file.
 
 A read that overlaps both a structural RNA and a gene is counted as ambiguous
 (featureCounts default), so it no longer inflates MAB1913 or MAB0304.
