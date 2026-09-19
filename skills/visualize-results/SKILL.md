@@ -22,7 +22,7 @@ One of:
 ## Produce the figures
 
 - **Volcano** (`${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq visualize <results.tsv> --out <stem> --top 10`
-  or `--genes MAB3648,MAB0812,...`): the significance cloud plus the selected
+  or `--genes MAB0001,MAB0002,...`): the significance cloud plus the selected
   genes highlighted and labeled.
 - **TPM bar / heatmap / ranking** (call `engine.viz.tpm` / `engine.viz.ranking`
   with counts + the SAF for gene lengths) for absolute-expression views.

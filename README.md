@@ -22,7 +22,7 @@ not open source: see [License](#license).
 | **export-results** | One Excel workbook: summary, per-contrast tables with gene names, normalized/VST/TPM values. |
 | **report-feedback** | Files a bug report or suggestion as a GitHub issue on this repository. |
 
-You talk to the agent ("run RNAseq on these FASTQs, SCFM2 vs 7H9"); the skills tell
+You talk to the agent ("run RNAseq on these FASTQs, treated vs control"); the skills tell
 it which commands to run and what to check.
 
 ## Install
@@ -75,8 +75,8 @@ export PATH="/path/to/bac-rnaseq/bin:$PATH"
 
 ```
 sample_id	fastq_r1	fastq_r2	condition
-7H9_rep1	/data/7H9_1_R1.fastq.gz	/data/7H9_1_R2.fastq.gz	7H9
-SCFM2_rep1	/data/SCFM2_1_R1.fastq.gz	/data/SCFM2_1_R2.fastq.gz	SCFM2
+control_rep1	/data/control_1_R1.fastq.gz	/data/control_1_R2.fastq.gz	control
+treated_rep1	/data/treated_1_R1.fastq.gz	/data/treated_1_R2.fastq.gz	treated
 ...
 ```
 
@@ -84,13 +84,13 @@ SCFM2_rep1	/data/SCFM2_1_R1.fastq.gz	/data/SCFM2_1_R2.fastq.gz	SCFM2
 fall back to a default.
 
 ```yaml
-run_name: media
+run_name: my_experiment
 reference:
   species: mabs            # mabs | mtb | custom (custom also needs fasta: and gff:)
   strandedness: reverse    # default; checked on the data during the run
 contrasts:
   explicit:
-    - {name: SCFM2_vs_7H9, numerator: SCFM2, denominator: 7H9}
+    - {name: treated_vs_control, numerator: treated, denominator: control}
 # optional:
 # reads: {layout: mate1_only}      # mixed single/paired-end sheet: run all from read 1
 # design: {batch_variable: batch}  # ~ batch + condition
@@ -172,9 +172,11 @@ location with `bac-rnaseq doctor --save-refs-root <dir>`.
 
 ## Things to know
 
-- **Gene IDs keep the GFF's case** (`MAB0001`, `MAB3648`). Some earlier tables from
-  the Rock lab use lowercase tags (`mab0001`). Gene matching in enrichment is
-  case-insensitive; when you join tables yourself, normalize the case first.
+- **Gene IDs keep the GFF's case** (`MAB0001`, `MAB0002`). Everywhere in the plugin
+  (enrichment, gene selection for figures, the Excel export's gene names, batch
+  integration) IDs are matched case-insensitively and with or without an underscore,
+  so `MAB0001`, `mab0001` and `MAB_0001` are the same gene. When you join tables
+  yourself, normalize the case first.
 - **Strains other than the reference.** Reads from *M. abscessus* subsp.
   *massiliense* or *bolletii* can be run against the ATCC 19977 bundle, but genes
   the strain has and ATCC 19977 lacks are invisible, and the alignment rate is lower
@@ -197,22 +199,6 @@ python -m pytest tests -q
 The suite includes a full run on real reads: 20,000 read pairs of a public
 reverse-stranded *M. abscessus* library bundled in `tests/fixtures/`. Tests that need
 unpublished lab data skip unless `BAC_RNASEQ_TESTDATA` points at it.
-
-## Verification status
-
-- [x] Pinned environment from `env/environment.yml` resolves on boulder
-      (DESeq2 1.42.0, R 4.3.3).
-- [x] Raw FASTQ → counts on real reads, including the strand-correctness gate, run
-      on the bundled public fixture (Linux/WSL).
-- [x] MultiQC over a real run (bundled fixture).
-- [x] A full-size real dataset on boulder (0.1.0 plus manual QC workarounds): the
-      public *M. abscessus* subsp. *massiliense* 1239 RNAseq (PRJNA602697; 9 libraries,
-      7H9 / SCFM2 / CF sputum). It reproduces the published DE tables (Pearson r
-      0.935-0.960, 92-98% same direction, all five qRT-PCR genes agree), and a
-      mate-1-only run agrees with the paired-end run at r = 0.989. The QC problems it
-      exposed are what 0.2.0 fixes.
-- [ ] A full-size run on boulder with 0.2.0.
-- [ ] Codex install path.
 
 ## Feedback
 
