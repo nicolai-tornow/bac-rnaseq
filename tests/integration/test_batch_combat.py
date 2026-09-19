@@ -3,8 +3,9 @@ import pytest
 import pandas as pd
 from pathlib import Path
 from engine.python.batch import run_combat
+from tests.testdata import lab
 
-VST = Path("/path/to/projects/rnaseq_mabs_media/06_deseq/vst_counts.tsv")
+VST = lab("rnaseq_mabs_media/06_deseq/vst_counts.tsv")
 pytestmark = pytest.mark.skipif(not (VST.exists() and shutil.which("Rscript")),
                                 reason="need real VST + Rscript")
 

@@ -6,9 +6,10 @@ from engine.viz.volcano import load_results
 from engine.enrichment.genesets import load_genesets, align_hits
 from engine.enrichment.ora import run_ora
 from engine.enrichment.bubble import bubble
+from tests.testdata import MABS_CATEGORIES, lab
 
-SHEET = Path("/path/to/projects/figures/supplemental/tables/SuppTable_gene_categorization.xlsx")
-CANDS = sorted(glob.glob("/path/to/projects/rnaseq_mabs_media/06_deseq/results/*.tsv"))
+SHEET = MABS_CATEGORIES
+CANDS = sorted(glob.glob(str(lab("rnaseq_mabs_media/06_deseq/results")) + "/*.tsv"))
 pytestmark = pytest.mark.skipif(not (SHEET.exists() and CANDS), reason="need sheet + results")
 
 

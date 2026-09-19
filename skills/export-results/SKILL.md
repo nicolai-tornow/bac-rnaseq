@@ -10,7 +10,7 @@ Tool names per `skills/_shared/references/<harness>-tools.md`.
 
 1. Gene names are derived from the reference GFF (`product`/`Name`/`gene`), so pass
    the same GFF used for the run (e.g. `${CLAUDE_PLUGIN_ROOT}/refs/mabs/NC_010397.1.gff3`).
-2. Run: `python -m engine.python.cli export --results-dir out/<run>/06_deseq/results --gff <gff> --out results.xlsx [--normalized <tsv> --vst <tsv>]`.
+2. Run: `${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq export --results-dir out/<run>/06_deseq/results --gff <gff> --out results.xlsx [--normalized <tsv> --vst <tsv>]`.
 3. The workbook has: `summary` (sig-gene counts per contrast), one sheet per contrast
    (DE table + a `gene_name` column), and `normalized`/`vst` sheets when provided.
    Report the workbook path.

@@ -3229,7 +3229,7 @@ H37RvBD	RefSeq	gene	3465775	3467088	.	-	.	ID=RVBD3097c;Name=PE_PGRS63;Alias=RVBD
 H37RvBD	RefSeq	gene	3467207	3467659	.	-	.	ID=RVBD3098c;Name=-;Alias=RVBD3098c;locus_tag=RVBD3098c;desc=hypothetical protein
 H37RvBD	RefSeq	gene	3467409	3467609	.	+	.	ID=RVBD3098B;Name=RVBD3098B;Alias=RVBD3098B;locus_tag=RVBD3098B;desc=toxin
 H37RvBD	RefSeq	gene	3467603	3467923	.	+	.	ID=RVBD3098A;Name=RVBD3098A;Alias=RVBD3098A;locus_tag=RVBD3098A;desc=antitoxin
-H37RvBD	RefSeq	gene	3467964	3468331	.	+	.	ID=ssr;Name=ssr;Alias=ssr;locus_tag=ssr;desc=transfer-messenger RNA
+H37RvBD	RefSeq	gene	3467964	3468331	.	-	.	ID=ssr;Name=ssr;Alias=ssr;locus_tag=ssr;desc=transfer-messenger RNA
 H37RvBD	RefSeq	gene	3468410	3469261	.	-	.	ID=RVBD3099c;Name=-;Alias=RVBD3099c;locus_tag=RVBD3099c;desc=hypothetical protein
 H37RvBD	RefSeq	gene	3469298	3469780	.	-	.	ID=RVBD3100c;Name=smpB;Alias=RVBD3100c;locus_tag=RVBD3100c;desc=SSRA-binding protein SmpB
 H37RvBD	RefSeq	gene	3469783	3470676	.	-	.	ID=RVBD3101c;Name=ftsX;Alias=RVBD3101c;locus_tag=RVBD3101c;desc=cell division protein FtsX

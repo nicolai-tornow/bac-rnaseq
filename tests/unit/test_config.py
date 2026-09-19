@@ -27,3 +27,21 @@ def test_custom_ok_with_paths():
 def test_bad_strandedness_rejected():
     with pytest.raises(ValueError):
         load_config({"run_name": "r", "reference": {"species": "mabs", "strandedness": "maybe"}})
+
+
+def test_unknown_key_rejected():
+    # A misspelt key must not silently fall back to the default strandedness.
+    with pytest.raises(ValueError):
+        load_config({"run_name": "r", "reference": {"species": "mabs", "strandness": "forward"}})
+
+
+def test_unknown_top_level_key_rejected():
+    with pytest.raises(ValueError):
+        load_config({"run_name": "r", "reference": {"species": "mabs"}, "treshold": {}})
+
+
+def test_reads_layout_default_and_mate1_only():
+    assert load_config({"run_name": "r", "reference": {"species": "mabs"}}).reads.layout == "auto"
+    cfg = load_config({"run_name": "r", "reference": {"species": "mabs"},
+                       "reads": {"layout": "mate1_only"}})
+    assert cfg.reads.layout == "mate1_only"

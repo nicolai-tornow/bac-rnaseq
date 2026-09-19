@@ -4,9 +4,10 @@ import shutil
 import subprocess
 import pytest
 from pathlib import Path
+from tests.testdata import lab
 
 REPO = Path(__file__).resolve().parents[2]
-REAL_COUNTS = Path("/path/to/projects/rnaseq_mabs_media/05_counts/counts.tsv")
+REAL_COUNTS = lab("rnaseq_mabs_media/05_counts/counts.tsv")
 pytestmark = pytest.mark.skipif(
     not (shutil.which("Rscript") and REAL_COUNTS.exists()),
     reason="need Rscript + real Mabs counts.tsv")

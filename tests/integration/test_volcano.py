@@ -2,8 +2,9 @@ import glob
 import os
 import pytest
 from engine.viz.volcano import load_results, volcano
+from tests.testdata import lab
 
-CANDS = sorted(glob.glob("/path/to/projects/rnaseq_mabs_media/06_deseq/results/*.tsv"))
+CANDS = sorted(glob.glob(str(lab("rnaseq_mabs_media/06_deseq/results")) + "/*.tsv"))
 pytestmark = pytest.mark.skipif(not CANDS, reason="no real result TSVs")
 
 

@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""bac-rnaseq command line. Works from any directory: bac-rnaseq <command> ...
+
+Run it with the Python of the bac-rnaseq environment (activate the env first).
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from engine.python.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())

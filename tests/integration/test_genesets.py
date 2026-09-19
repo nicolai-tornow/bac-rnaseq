@@ -1,8 +1,9 @@
 import pytest
 from pathlib import Path
 from engine.enrichment.genesets import load_genesets, align_hits
+from tests.testdata import MABS_CATEGORIES
 
-SHEET = Path("/path/to/projects/figures/supplemental/tables/SuppTable_gene_categorization.xlsx")
+SHEET = MABS_CATEGORIES
 pytestmark = pytest.mark.skipif(not SHEET.exists(), reason="no category sheet")
 
 
