@@ -15,6 +15,7 @@ import yaml
 from .samplesheet import read_samplesheet, is_paired, apply_layout, check_samplesheet
 from .contrasts import expand_contrasts
 from .build_refs import build_bundle, md5
+from .checksums import check_md5s, expected_md5s, read_md5_manifest
 from . import commands as C
 from . import qc_triage, run_report, siteconfig
 from .procs import Cancelled, ProcRunner, Terminated, as_runner
@@ -128,14 +129,18 @@ def _aligner_versions() -> dict:
     out = {}
     for tool, v in run_report.tool_versions().items():
         if tool in ("fastp", "bowtie2"):
-            m = re.search(r"version\s+v?(\d[\w.-]*)", v or "") or re.search(r"\b(\d+\.\d+[\w.-]*)", v or "")
+            m = (re.search(r"version\s+v?(\d[\w.-]*)", v or "")
+                 or re.search(r"\b(\d+\.\d+[\w.-]*)", v or ""))
             out[tool] = m.group(1) if m else v
     return out
 
 
-def _sample_inputs(s, paired, bundle) -> dict:
+def _sample_inputs(s, paired, bundle, md5s=None) -> dict:
     """What a sample's BAM was made from; any change makes the sample re-run."""
-    return {"tools": _aligner_versions(), "fastq_r1": _fastq_id(s.fastq_r1), "fastq_r2": _fastq_id(s.fastq_r2),
+    extra = ({"md5": {"r1": md5s.get(s.fastq_r1), "r2": md5s.get(s.fastq_r2)}}
+             if md5s else {})
+    return {**extra, "tools": _aligner_versions(),
+            "fastq_r1": _fastq_id(s.fastq_r1), "fastq_r2": _fastq_id(s.fastq_r2),
             "paired": paired,
             "reference_fasta_md5": (bundle.get("stamp") or {}).get("fasta_md5"),
             "fastp_args": list(C.FASTP_SETTINGS), "bowtie2_args": list(C.BOWTIE2_SETTINGS)}
@@ -166,13 +171,14 @@ def _tail(path, n=15) -> str:
     return "\n".join(p.read_text(errors="replace").splitlines()[-n:]) if p.exists() else ""
 
 
-def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None):
+def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None, md5s=None):
     """fastp -> bowtie2 | samtools sort into staging folders; outputs are moved into
     place only after every check passed, and the completion marker is written last.
     A sample with a valid marker is skipped (its trimmed reads need not exist)."""
     sid = s.sample_id
     fin = _final_paths(out, sid)
-    inputs = _sample_inputs(s, paired, bundle)
+    mine = {f: md5s[f] for f in (s.fastq_r1, s.fastq_r2) if f and md5s and f in md5s}
+    inputs = _sample_inputs(s, paired, bundle, mine)
     ok, why = _marker_valid(fin, inputs)
     if ok:
         if not fin["bai"].exists():
@@ -185,8 +191,13 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None):
     for d in (tstage, astage):
         shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True)
-    step, done = "fastp", False
+    step, done = "md5", False
     try:
+        if mine:                      # only a sample being (re)processed reads its FASTQs
+            problems = check_md5s(mine)
+            if problems:
+                raise RuntimeError("; ".join(problems))
+        step = "fastp"
         t1 = tstage / f"{sid}_R1.fq.gz"
         t2 = tstage / f"{sid}_R2.fq.gz" if paired else None
         fjson = tstage / f"{sid}.json"
@@ -435,7 +446,7 @@ def _promote_dir(src, dst):
         os.replace(p, target)
 
 
-def _trim_align(samples, paired, out, bundle, threads, par, runner, cleaned):
+def _trim_align(samples, paired, out, bundle, threads, par, runner, cleaned, md5s=None):
     """Samples in parallel; the first failure cancels the rest (queued ones never
     start, running ones are killed and remove their staging)."""
     failed = threading.Event()
@@ -446,7 +457,8 @@ def _trim_align(samples, paired, out, bundle, threads, par, runner, cleaned):
         if failed.is_set() or runner.cancelled.is_set():
             raise Cancelled(s.sample_id)
         try:
-            return _process_sample(s, paired, out, bundle, threads, runner, cleaned=cleaned)
+            return _process_sample(s, paired, out, bundle, threads, runner, cleaned=cleaned,
+                                   md5s=md5s)
         except BaseException:
             failed.set()
             raise
@@ -484,7 +496,7 @@ def _write_failed_report(out, config, state, exc):
 
 
 def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
-                 allow_qc_fail=False, check_files=True):
+                 allow_qc_fail=False, check_files=True, md5_manifest=None):
     """Pre-flight errors and a live lock raise without touching the run folder's
     report. Once the run holds the lock, any failure (incl. Ctrl-C and SIGTERM)
     kills running tools, removes staging, writes a `failed` report and re-raises."""
@@ -497,6 +509,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
     problems = check_samplesheet(samples, cons, check_files=check_files)
     if problems:
         raise ValueError("sample sheet problems:\n  " + "\n  ".join(problems))
+    md5s = expected_md5s(samples, read_md5_manifest(md5_manifest) if md5_manifest else None)
 
     runner = ProcRunner() if runner is None else as_runner(runner)
     out.mkdir(parents=True, exist_ok=True)
@@ -513,7 +526,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
         if swept:
             state["provenance"]["stale_staging_removed"] = swept
         return _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples,
-                           paired, cons, runner, allow_qc_fail, state)
+                           paired, cons, runner, allow_qc_fail, state, md5s)
     except BaseException as e:
         runner.cancel()
         state["cleaned"] += _sweep_staging(out)
@@ -525,7 +538,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
 
 
 def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, paired, cons,
-                runner, allow_qc_fail, state):
+                runner, allow_qc_fail, state, md5s=None):
     for d in ["00_inputs", "01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align",
               "05_counts", "06_deseq", "qc"]:
         (out / d).mkdir(parents=True, exist_ok=True)
@@ -573,7 +586,8 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
 
     # Trim + align several samples at once, splitting the thread budget.
     state["stage"] = "trim_align"
-    reads = _trim_align(samples, paired, out, bundle, per_sample, par, runner, state["cleaned"])
+    reads = _trim_align(samples, paired, out, bundle, per_sample, par, runner, state["cleaned"],
+                        md5s)
     provenance["reads"] = reads
 
     # Before counting, prove every sample's outputs are intact; re-process once.
@@ -584,7 +598,7 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
             continue
         _remove_outputs(_final_paths(out, s.sample_id))
         reads[s.sample_id] = _process_sample(s, paired, out, bundle, threads, runner,
-                                             cleaned=state["cleaned"])
+                                             cleaned=state["cleaned"], md5s=md5s)
         reads[s.sample_id]["reprocessed_after_integrity"] = problems
         again = _sample_integrity(s.sample_id, paired, out, runner, threads)
         if again:

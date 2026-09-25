@@ -18,6 +18,8 @@ class Sample:
     fastq_r2: Optional[str] = None
     replicate: Optional[str] = None
     batch: Optional[str] = None
+    md5_r1: Optional[str] = None
+    md5_r2: Optional[str] = None
 
 
 def read_samplesheet(path) -> list[Sample]:
@@ -38,7 +40,9 @@ def read_samplesheet(path) -> list[Sample]:
         r2 = (r.get("fastq_r2") or "").strip() or None
         out.append(Sample(sid, r["fastq_r1"].strip(), r["condition"].strip(),
                            r2, (r.get("replicate") or "").strip() or None,
-                           (r.get("batch") or "").strip() or None))
+                           (r.get("batch") or "").strip() or None,
+                           (r.get("md5_r1") or "").strip().lower() or None,
+                           (r.get("md5_r2") or "").strip().lower() or None))
     return out
 
 
@@ -68,6 +72,10 @@ def check_samplesheet(samples, contrasts=(), check_files=True) -> list[str]:
         if not SAFE_ID.match(s.sample_id):
             problems.append(f"sample_id '{s.sample_id}' must match {SAFE_ID.pattern} "
                             "(used as a file name and a column name)")
+        for col in ("md5_r1", "md5_r2"):
+            v = getattr(s, col)
+            if v and not re.fullmatch(r"[0-9a-f]{32}", v):
+                problems.append(f"{s.sample_id}: {col} '{v}' is not a 32-character md5")
         if check_files:
             for f in (s.fastq_r1, s.fastq_r2):
                 if f and not Path(f).is_file():

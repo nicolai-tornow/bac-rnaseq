@@ -36,6 +36,19 @@ def _validate(args):
     print(f"sample sheet ok: {len(samples)} samples, "
           f"{'paired' if paired else 'single'}-end, contrasts: "
           + ", ".join(f"{c.name} ({c.numerator} vs {c.denominator})" for c in cons))
+    if args.md5 or any(s.md5_r1 or s.md5_r2 for s in samples):
+        from .checksums import check_md5s, expected_md5s, read_md5_manifest
+        try:
+            exp = expected_md5s(samples, read_md5_manifest(args.md5) if args.md5 else None)
+        except ValueError as e:
+            print(f"md5: {e}", file=sys.stderr)
+            return 2
+        bad = check_md5s(exp)
+        if bad:
+            print("md5 problems:\n  " + "\n  ".join(bad), file=sys.stderr)
+            return 2
+        n = sum(1 for s in samples for f in (s.fastq_r1, s.fastq_r2) if f)
+        print(f"md5 ok: {len(exp)} of {n} FASTQs checked")
     return 0
 
 
@@ -80,7 +93,7 @@ def _run(args):
     report = os.path.join(args.work_dir, "out", cfg.run_name, "00_run_report.json")
     try:
         rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
-                                      allow_qc_fail=args.allow_qc_fail)
+                                      allow_qc_fail=args.allow_qc_fail, md5_manifest=args.md5)
     except RunLocked as e:
         print(f"run '{cfg.run_name}' refused: {e}", file=sys.stderr)
         return 2
@@ -176,6 +189,7 @@ def main(argv=None):
     v = sub.add_parser("validate")
     v.add_argument("config")
     v.add_argument("--samplesheet", help="also check the sample sheet against the config")
+    v.add_argument("--md5", help="md5sum file of the raw FASTQs (also: md5_r1/md5_r2 columns)")
     v.set_defaults(fn=_validate)
     b = sub.add_parser("build-refs")
     b.add_argument("--species", required=True)
@@ -201,6 +215,7 @@ def main(argv=None):
                     help="source reference files (default: the plugin's refs/)")
     rn.add_argument("--allow-qc-fail", dest="allow_qc_fail", action="store_true",
                     help="proceed to DESeq2 even if a sample FAILs QC (recorded in the run report)")
+    rn.add_argument("--md5", help="md5sum file of the raw FASTQs, checked before trimming")
     rn.set_defaults(fn=_run)
     vz = sub.add_parser("visualize")
     vz.add_argument("results")
