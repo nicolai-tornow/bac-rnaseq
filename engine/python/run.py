@@ -417,16 +417,30 @@ def _promote_dir(src, dst):
 def _trim_align(samples, paired, out, bundle, threads, par, runner, cleaned):
     """Samples in parallel; the first failure cancels the rest (queued ones never
     start, running ones are killed and remove their staging)."""
+    failed = threading.Event()
+
+    def one(s):
+        # A worker whose sample failed picks up the next queued sample before the
+        # main thread can react, so the failure flag is set here, not in main.
+        if failed.is_set() or runner.cancelled.is_set():
+            raise Cancelled(s.sample_id)
+        try:
+            return _process_sample(s, paired, out, bundle, threads, runner, cleaned=cleaned)
+        except BaseException:
+            failed.set()
+            raise
+
     pool = ThreadPoolExecutor(max_workers=par)
-    futures = {pool.submit(_process_sample, s, paired, out, bundle, threads, runner,
-                           cleaned=cleaned): s.sample_id for s in samples}
+    futures = {pool.submit(one, s): s.sample_id for s in samples}
     reads = {}
     try:
         for f in as_completed(futures):
             reads[futures[f]] = f.result()
     except BaseException:
+        failed.set()
+        pool.shutdown(wait=False, cancel_futures=True)
         runner.cancel()
-        pool.shutdown(wait=True, cancel_futures=True)
+        pool.shutdown(wait=True)
         raise
     pool.shutdown(wait=True)
     return {s.sample_id: reads[s.sample_id] for s in samples}

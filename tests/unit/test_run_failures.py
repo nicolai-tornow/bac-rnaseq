@@ -136,8 +136,10 @@ def test_first_failure_stops_queued_samples(env):
                              if any("s0_R1" in a for a in cmd) else None})
     with pytest.raises(R.SampleError):
         _run(env, tools)
-    fastp_inputs = [c[c.index("--in1") + 1] for c in tools.called("fastp")]
-    assert len(fastp_inputs) == 1 and "s0_R1" in fastp_inputs[0]
+    touched = [c for c in tools.calls if c[0] != "fastqc"   # raw QC runs before trimming
+               and any(f"s{i}_R" in a or f".s{i}." in a for a in c for i in (1, 2))]
+    assert touched == [], touched                    # queued samples never started
+    assert not any(".s1." in c or ".s2." in c for c in _report(env)["failure"]["cleaned"])
 
 
 def test_live_lock_refuses_before_any_work(env):

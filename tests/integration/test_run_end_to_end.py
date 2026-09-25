@@ -7,6 +7,7 @@ test_deseq2_r.py on real count tables.
 import gzip
 import json
 import shutil
+import subprocess
 import pytest
 from engine.python.config import load_config
 from engine.python import run as R
@@ -58,7 +59,15 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     assert set(nc) == {"MABnc_rnpB", "MABnc_ms1", "MABnc_ssrA", "MABnc_ffs"}
     assert int(nc["MABnc_ms1"][0]) > 100               # Ms1 is abundant in this library
 
-    assert not list((out / "04_align").glob("*.sam"))  # intermediate SAMs removed
+    assert not list(tmp_path.rglob("*.sam"))           # alignments are piped, never a SAM
+    assert not [p for p in tmp_path.rglob("*") if p.name.endswith(".partial")]
+    assert not list(tmp_path.rglob("temp-core-*")) and not (out / ".lock").exists()
+    for i in range(4):
+        marker = json.loads((out / f"04_align/s{i}.done.json").read_text())
+        assert marker["bam_records"] > 0 and marker["reads_passed"] > 0
+        hdr = subprocess.run(["samtools", "view", "-H", str(out / f"04_align/s{i}.bam")],
+                             capture_output=True, text=True).stdout
+        assert "SO:coordinate" in hdr
     assert (out / "qc/multiqc/multiqc_report.html").exists()
     assert list((out / "01_qc_raw").glob("*_fastqc.html"))
     assert list((out / "03_qc_trimmed").glob("*_fastqc.html"))
