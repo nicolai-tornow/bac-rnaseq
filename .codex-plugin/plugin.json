@@ -1,6 +1,6 @@
 {
   "name": "bac-rnaseq",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Bacterial RNAseq pipeline plugin for Codex CLI.",
   "author": { "name": "Nicolai Tornow" },
   "homepage": "https://github.com/nicolai-tornow/bac-rnaseq",
