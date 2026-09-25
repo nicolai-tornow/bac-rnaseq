@@ -6,7 +6,7 @@
     {
       "name": "bac-rnaseq",
       "description": "Bacterial RNAseq pipeline: QC, alignment, DESeq2, visualization, enrichment",
-      "version": "0.3.0",
+      "version": "0.3.3",
       "source": "./",
       "author": { "name": "Nicolai Tornow" },
       "category": "development"
