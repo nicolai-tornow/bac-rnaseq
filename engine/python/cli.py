@@ -74,9 +74,24 @@ def _doctor(args):
 
 
 def _run(args):
+    from .procs import Terminated
+    from .runlock import RunLocked
     cfg = load_config(args.config)
-    rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
-                                  allow_qc_fail=args.allow_qc_fail)
+    report = os.path.join(args.work_dir, "out", cfg.run_name, "00_run_report.json")
+    try:
+        rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
+                                      allow_qc_fail=args.allow_qc_fail)
+    except RunLocked as e:
+        print(f"run '{cfg.run_name}' refused: {e}", file=sys.stderr)
+        return 2
+    except (Terminated, KeyboardInterrupt) as e:
+        print(f"run '{cfg.run_name}' stopped ({type(e).__name__}); partial files were "
+              f"removed; see {report}", file=sys.stderr)
+        return 143 if isinstance(e, Terminated) else 130
+    except Exception as e:
+        print(f"run '{cfg.run_name}' failed: {e}"
+              + (f"\n  report: {report}" if os.path.exists(report) else ""), file=sys.stderr)
+        return 1
     print(f"run '{rep.get('run_name')}': {rep.get('status')}")
     return 0 if rep.get("status") == "ok" else 1
 
