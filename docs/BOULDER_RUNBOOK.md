@@ -74,8 +74,9 @@ The strand-correctness gate and a full end-to-end run use the bundled read fixtu
   share and the alignment rate. Do not change strandedness.
 - **Alignment below 90% (FAIL).** Common for a strain other than the reference
   (for example *M. abscessus* subsp. *massiliense* against ATCC 19977) or for host
-  contamination. Decide whether to proceed; if so, re-run with `--allow-qc-fail`
-  (alignment is reused).
+  contamination. The run report's `unaligned` entry (GC%, rRNA-like fraction) helps
+  tell them apart. Decide whether to proceed; if so, re-run with
+  `--allow-qc-fail --reason "<why>"` (alignment is reused).
 - **`build-refs` raises "SAF Chr not in FASTA sequence IDs".** A custom genome's GFF
   seqids differ from its FASTA headers; add a `seqid_map` to `reference:`.
 - **ComBat over-corrects.** There was no real batch effect; trust the "before" PCA.
