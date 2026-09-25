@@ -111,12 +111,27 @@ SIX = "sample_id\tfastq_r1\tcondition\n" + "".join(
     f"s{i}\tA{i}.fq.gz\t{'7H9' if i < 3 else 'SCFM2'}\n" for i in range(6))
 
 
-def test_default_runs_one_sample_per_8_threads(tmp_path, monkeypatch):
+def test_default_runs_one_sample_at_a_time(tmp_path, monkeypatch):
     ss, runner, _, _, processed = _setup(tmp_path, monkeypatch, sheet=SIX)
     rep = R.run_pipeline(_cfg(resources={"threads": 32}), tmp_path, tmp_path, str(ss),
                          runner=runner, check_files=False)
-    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (4, 8)
-    assert {t for *_, t in processed} == {8} and len(processed) == 6
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (1, 32)
+    assert {t for *_, t in processed} == {32} and len(processed) == 6
+
+
+@pytest.mark.parametrize("fs,par,warned", [("nfs", 4, True), ("nfs", 1, False),
+                                           ("ext2/ext3", 4, False)])
+def test_parallel_samples_on_nfs_warns(tmp_path, monkeypatch, fs, par, warned):
+    ss, runner, _, _, _ = _setup(tmp_path, monkeypatch, sheet=SIX)
+    monkeypatch.setattr(R, "_fs_type", lambda path: fs)
+    rep = R.run_pipeline(_cfg(resources={"threads": 32, "parallel_samples": par}), tmp_path,
+                         tmp_path, str(ss), runner=runner, check_files=False)
+    assert bool([w for w in rep["warnings"] if "NFS" in w]) is warned
+
+
+def test_fs_type_reports_the_filesystem(tmp_path):
+    assert R._fs_type(tmp_path)
+    assert R._fs_type(tmp_path / "missing") is None
 
 
 def test_parallel_samples_override_and_small_budget(tmp_path, monkeypatch):

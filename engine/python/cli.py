@@ -65,9 +65,8 @@ def _doctor(args):
              ["fastp", "fastqc", "bowtie2", "samtools", "featureCounts", "multiqc", "Rscript"]}
     print(f"cores detected: {total}; suggested budget: {sug}; "
           f"saved budget: {site.get('threads', 'none')}")
-    budget = site.get("threads") or sug
-    print(f"samples in parallel: {site.get('parallel_samples') or max(1, budget // 8)} "
-          f"({'saved' if site.get('parallel_samples') else 'default: 8 threads per sample'})")
+    print(f"samples in parallel: {site.get('parallel_samples') or 1} "
+          f"({'saved' if site.get('parallel_samples') else 'default: one sample with all threads'})")
     print(f"reference bundles: {site.get('refs_root', 'none saved (built per work dir)')}")
     for t, p in tools.items():
         print(f"  {t}: {'OK' if p else 'MISSING'}")

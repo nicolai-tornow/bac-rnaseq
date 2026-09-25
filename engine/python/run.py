@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -19,7 +20,6 @@ from .procs import Cancelled, ProcRunner, Terminated, as_runner
 from .runlock import RunLock
 
 STRANDS = ("reverse", "forward", "unstranded")
-CORES_PER_SAMPLE = 8      # default split of the thread budget across parallel samples
 SORT_MEM = "256M"         # samtools sort memory per thread (4 x 8 threads ~ 8 GB)
 
 
@@ -40,11 +40,22 @@ def _threads(config) -> int:
 
 
 def _parallelism(config, total, n_samples):
-    """(samples at once, threads per sample). Default: one sample per 8 threads."""
+    """(samples at once, threads per sample). Default: one sample with all threads."""
     par = (config.resources.parallel_samples or siteconfig.read_site().get("parallel_samples")
-           or max(1, total // CORES_PER_SAMPLE))
+           or 1)
     par = max(1, min(par, n_samples))
     return par, max(1, total // par)
+
+
+def _fs_type(path) -> str | None:
+    """File system type of `path` (e.g. nfs, ext2/ext3), or None."""
+    try:
+        r = subprocess.run(["stat", "-f", "-c", "%T", str(path)], capture_output=True, text=True)
+    except OSError:
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
 
 
 def _bundle_dir(config, work_dir) -> Path:
@@ -488,6 +499,12 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
               "threads": threads, "parallel_samples": par,
               "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail}
     state["params"] = params
+    fs = _fs_type(out)
+    if par > 1 and fs and fs.startswith("nfs"):
+        state["warnings"].append(
+            f"parallel_samples={par} on an NFS mount ({fs}): samples compete for the "
+            "shared file server; one sample at a time (the default) is usually as fast "
+            "and safer")
     provenance = state["provenance"]
     provenance["inputs"] = {"config": "00_inputs/config.yaml",
                             "samplesheet": "00_inputs/samplesheet.tsv"}
