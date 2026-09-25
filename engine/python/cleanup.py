@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import json
 import os
+import pwd
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +40,7 @@ class Plan:
     kept_bytes: int = 0
     refusals: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    unsafe: list = field(default_factory=list)   # would be deleted, but cannot be regenerated
 
     def by_tier(self) -> dict:
         out = {}
@@ -71,33 +74,71 @@ def _candidates(run_dir) -> list[Candidate]:
     return sorted(found.values(), key=lambda c: str(c.path))
 
 
-def _sheet_paths(run_dir) -> list[str]:
-    """FASTQ paths of 00_inputs/samplesheet.tsv. `run` copies a CSV sheet verbatim
-    under that name, so the delimiter is read from the header, not the file name."""
+def _sheet_samples(run_dir) -> dict[str, list[tuple[str, str]]]:
+    """sample_id -> [(mate, FASTQ path)] of 00_inputs/samplesheet.tsv. `run` copies a
+    CSV sheet verbatim under that name, so the delimiter is read from the header."""
     text = (run_dir / "00_inputs" / "samplesheet.tsv").read_text()
     lines = text.splitlines()
     delim = "\t" if lines and "\t" in lines[0] else ","
     rows = csv.DictReader(lines, delimiter=delim)
     if not rows.fieldnames or "fastq_r1" not in rows.fieldnames:
         raise ValueError("no fastq_r1 column")
-    return [v.strip() for r in rows for k in ("fastq_r1", "fastq_r2")
-            if (v := r.get(k) or "").strip()]
+    return {(r.get("sample_id") or "").strip(): [(m, v.strip()) for m, k in
+                                                 (("r1", "fastq_r1"), ("r2", "fastq_r2"))
+                                                 if (v := r.get(k) or "").strip()]
+            for r in rows}
 
 
-def _protected(run_dir, paths, cwd) -> tuple[set, set]:
-    """Realpaths and (device, inode) of the sheet's FASTQs. A relative path is taken
-    relative to every place `run` may have been started from."""
+def _marker_fastqs(run_dir, sid) -> dict:
+    """mate -> realpath of the raw FASTQ the completion marker says the BAM came from."""
+    try:
+        inp = json.loads((run_dir / "04_align" / f"{sid}.done.json").read_text()).get("inputs")
+        return {m: inp[f"fastq_{m}"]["path"] for m in ("r1", "r2")
+                if (inp.get(f"fastq_{m}") or {}).get("path")}
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return {}
+
+
+def _raw_fastqs(run_dir, sheet, cwd) -> tuple[set, set, dict]:
+    """Realpaths and (device, inode) of every raw FASTQ, and per sample whether all
+    of its raw FASTQs still exist (only then can its intermediates be regenerated).
+    A relative sheet path is tried against every place `run` may have been started
+    from; the completion marker records the realpath the run actually read."""
     bases = [run_dir.parent.parent, Path(cwd or os.getcwd()), run_dir / "00_inputs"]
-    real, inodes = set(), set()
-    for v in paths:
-        for c in ([Path(v)] if os.path.isabs(v) else [b / v for b in bases]):
-            real.add(os.path.realpath(c))
-            try:
-                st = os.stat(c)
-                inodes.add((st.st_dev, st.st_ino))
-            except OSError:
-                pass
-    return real, inodes
+    real, inodes, raw_ok = set(), set(), {}
+    for sid, fastqs in sheet.items():
+        marker = _marker_fastqs(run_dir, sid)
+        ok = bool(fastqs)
+        for mate, v in fastqs:
+            cands = [Path(v)] if os.path.isabs(v) else [b / v for b in bases]
+            if marker.get(mate):
+                cands.append(Path(marker[mate]))
+            for c in cands:
+                real.add(os.path.realpath(c))
+                try:
+                    st = os.stat(c)
+                    inodes.add((st.st_dev, st.st_ino))
+                except OSError:
+                    pass
+            ok = ok and any(c.is_file() for c in cands)
+        raw_ok[sid] = ok
+    return real, inodes, raw_ok
+
+
+_SAMPLE_OF = {"trimmed": re.compile(r"(.+)_R[12]\.fq\.gz"), "sam": re.compile(r"(.+)\.sam"),
+              "bam": re.compile(r"(.+?)(?:\.bam\.bai|\.bam|\.bai)")}
+
+
+def _sample_of(c) -> str | None:
+    m = _SAMPLE_OF[c.tier].fullmatch(c.path.name) if c.tier in _SAMPLE_OF else None
+    return m.group(1) if m else None
+
+
+def _owner(path) -> str:
+    try:
+        return pwd.getpwuid(os.stat(path).st_uid).pw_name
+    except (KeyError, OSError):
+        return "unknown"
 
 
 def _newest(run_dir) -> tuple[float | None, str | None]:
@@ -119,7 +160,8 @@ def _newest(run_dir) -> tuple[float | None, str | None]:
 def _all_files(run_dir):
     for root, _, files in os.walk(run_dir):
         for f in files:
-            yield Path(root) / f
+            if not f.startswith(runlock.LOCK_NAME):
+                yield Path(root) / f
 
 
 def plan(run_dir, include_bams=False, idle_minutes=IDLE_MINUTES, now=None, cwd=None,
@@ -160,19 +202,38 @@ def plan(run_dir, include_bams=False, idle_minutes=IDLE_MINUTES, now=None, cwd=N
                           f"may still be writing here. Retry after {retry}, or pass "
                           "--idle-minutes 0 if you are sure nothing is running")
 
-    p.candidates = _candidates(run_dir)
-    p.selected = [c for c in p.candidates if c.tier in p.tiers]
-
     try:
-        real, inodes = _protected(run_dir, _sheet_paths(run_dir), cwd)
+        real, inodes, raw_ok = _raw_fastqs(run_dir, _sheet_samples(run_dir), cwd)
     except FileNotFoundError:
-        real, inodes = set(), set()
+        real, inodes, raw_ok = set(), set(), {}
         p.refusals.append("00_inputs/samplesheet.tsv is missing, so the raw FASTQs cannot be "
                           "protected")
     except (OSError, ValueError) as e:
-        real, inodes = set(), set()
+        real, inodes, raw_ok = set(), set(), {}
         p.refusals.append(f"00_inputs/samplesheet.tsv cannot be read ({e}), so the raw "
                           "FASTQs cannot be protected")
+
+    # Trimmed reads, SAMs and BAMs are deleted only for a sample of the sheet whose raw
+    # FASTQs still exist; anything else may be the last copy of its reads.
+    p.candidates = _candidates(run_dir)
+    for c in p.candidates:
+        if c.tier not in p.tiers:
+            continue
+        if c.tier != "fc_temp" and not raw_ok.get(_sample_of(c)):
+            p.unsafe.append(c)
+        else:
+            p.selected.append(c)
+    if p.unsafe:
+        names = sorted({_sample_of(c) or c.path.name for c in p.unsafe})
+        p.notes.append(f"kept {len(p.unsafe)} file(s) of {', '.join(names)}: their raw FASTQs "
+                       "are missing or the sample is not in the sample sheet, so they "
+                       "cannot be regenerated")
+
+    for d in sorted({run_dir, *(c.path.parent for c in p.selected)}):
+        if not os.access(d, os.W_OK):
+            rel = os.path.relpath(d, run_dir)
+            p.refusals.append(f"{'the run folder' if rel == '.' else rel} is not writable by "
+                              f"you (owner: {_owner(d)}); ask them to run the clean-up")
     for c in p.selected:
         rel = c.path.relative_to(run_dir)
         if c.path.is_symlink():
@@ -192,8 +253,12 @@ def plan(run_dir, include_bams=False, idle_minutes=IDLE_MINUTES, now=None, cwd=N
     cand = {c.path for c in p.candidates}
     for f in _all_files(run_dir):
         if f not in cand:
+            try:
+                size = f.lstat().st_size
+            except OSError:           # vanished during the walk
+                continue
             p.kept_files += 1
-            p.kept_bytes += f.lstat().st_size
+            p.kept_bytes += size
 
     if include_bams and any(c.tier == "bam" for c in p.selected):
         p.notes.append("the next run re-trims and re-aligns every sample whose BAM is removed")
@@ -212,10 +277,16 @@ def format_plan(p: Plan) -> str:
     lines = [f"clean-up of {p.run_dir}", "",
              f"{'tier':<9} {'action':<7} {'files':>6} {'GB':>8}"]
     for tier in TIERS:
-        n, b = t.get(tier, (0, 0))
-        action = "delete" if tier in p.tiers else "keep"
-        hint = "   (--include-bams to delete)" if tier == "bam" and n and not p.include_bams else ""
-        lines.append(f"{tier:<9} {action:<7} {n:>6} {_gb(b):>8}{hint}")
+        if tier in p.tiers:
+            sel = [c for c in p.selected if c.tier == tier]
+            n, b = len(sel), sum(c.bytes for c in sel)
+            kept = sum(1 for c in p.unsafe if c.tier == tier)
+            hint = f"   (+{kept} kept: cannot be regenerated)" if kept else ""
+            lines.append(f"{tier:<9} {'delete':<7} {n:>6} {_gb(b):>8}{hint}")
+        else:
+            n, b = t.get(tier, (0, 0))
+            hint = "   (--include-bams to delete)" if tier == "bam" and n else ""
+            lines.append(f"{tier:<9} {'keep':<7} {n:>6} {_gb(b):>8}{hint}")
     lines.append(f"{'other':<9} {'keep':<7} {p.kept_files:>6} {_gb(p.kept_bytes):>8}")
     lines.append(f"{'total':<9} {'delete':<7} {len(p.selected):>6} "
                  f"{_gb(sum(c.bytes for c in p.selected)):>8}")

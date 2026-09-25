@@ -76,3 +76,17 @@ def test_cleanup_refused_for_unfinished_run(tmp_path):
     r = _bin(["cleanup", str(out), "--yes"], tmp_path)
     assert r.returncode == 2 and "qc_fail" in r.stdout
     assert (out / "02_trimmed/s1_R1.fq.gz").exists()
+
+
+def test_cleanup_io_error_is_a_message_not_a_traceback(tmp_path, monkeypatch, capsys):
+    from engine.python import cleanup as CL
+    from engine.python import cli
+    from tests.unit.test_cleanup import make_run
+    out, _ = make_run(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError(13, "Permission denied")
+    monkeypatch.setattr(CL, "execute", boom)
+    assert cli.main(["cleanup", str(out), "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "Permission denied" in err and "Traceback" not in err

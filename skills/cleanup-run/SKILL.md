@@ -15,6 +15,9 @@ Tool names per `skills/_shared/references/<harness>-tools.md`. The CLI is
      `fc_temp` (featureCounts temp files from crashed runs) are deleted by default.
    - `bam` is kept unless `--include-bams`. Logs, QC, counts, DESeq2 results, the run
      report and the completion markers are always kept. Raw FASTQs are never touched.
+   - Trimmed reads, SAMs and BAMs are deleted only for samples of the sample sheet whose
+     raw FASTQs still exist; the rest are kept (`+N kept: cannot be regenerated`),
+     because they may be the last copy of those reads.
 2. If it says REFUSED (exit code 2), explain the reason and stop. Never delete files by
    hand to get around a refusal. A refusal only because files changed recently (for
    example right after a run) says when to retry; use `--idle-minutes 0` only if the

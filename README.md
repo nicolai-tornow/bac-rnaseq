@@ -138,8 +138,9 @@ bac-rnaseq cleanup out/my_experiment --yes --include-bams   # BAMs too
 
 It refuses when the run did not finish with `status: "ok"`, while a run holds the
 folder or changed files in the last 15 minutes, and when a file to delete is a
-symlink, lies outside the run folder or is a raw FASTQ from the sample sheet. A later
-run regenerates whatever it needs.
+symlink, lies outside the run folder or is a raw FASTQ from the sample sheet. Trimmed
+reads and BAMs of a sample whose raw FASTQs are gone are kept. A later run regenerates
+whatever it needs.
 
 ## Quality control
 

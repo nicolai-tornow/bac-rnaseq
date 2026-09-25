@@ -162,6 +162,9 @@ def _cleanup(args):
     except CL.CleanupRefused as err:
         print("\nREFUSED, nothing was deleted:\n" + "\n".join(f"  - {r}" for r in err.reasons))
         return 2
+    except OSError as err:
+        print(f"clean-up stopped: {err}", file=sys.stderr)
+        return 1
     print(f"\ndeleted {e['files']} files ({e['bytes'] / 1e9:.2f} GB); listed in "
           f"{os.path.join(args.run_dir, e['manifest'])}")
     return 0
