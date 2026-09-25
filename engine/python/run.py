@@ -225,6 +225,36 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None):
                     cleaned.append(str(d.relative_to(out)))
 
 
+def _sample_integrity(sid, paired, out, runner, threads) -> list[str]:
+    """Trimmed FASTQs (when still present) decompress and hold what fastp passed;
+    the BAM holds the records its completion marker recorded."""
+    fin = _final_paths(out, sid)
+    try:
+        m = json.loads(fin["marker"].read_text())
+    except (OSError, ValueError):
+        return ["completion marker missing or unreadable"]
+    problems = []
+    rp = m.get("reads_passed")
+    want = (rp // 2 if paired else rp) if isinstance(rp, int) else None
+    for k in ("r1", "r2") if paired else ("r1",):
+        f = fin[k]
+        if not f.exists():          # cleaned up; the BAM check still applies
+            continue
+        res = runner.pipe(["gzip", "-cd", str(f)], ["wc", "-l"])
+        if res.rc1 != 0 or res.rc2 != 0:
+            problems.append(f"{f.name}: not a valid gzip stream")
+            continue
+        n = int(res.stdout.strip() or 0) // 4
+        if want is not None and n != want:
+            problems.append(f"{f.name}: {n} reads, but fastp passed {want}")
+    res = runner.run(["samtools", "view", "-c", "-@", str(threads), str(fin["bam"])])
+    n = res.stdout.strip()
+    if res.returncode != 0 or not n.isdigit() or int(n) != m.get("bam_records"):
+        problems.append(f"{fin['bam'].name}: {n or 'unreadable'} records, but the "
+                        f"completion marker says {m.get('bam_records')}")
+    return problems
+
+
 def _fastp_stats(fjson) -> dict:
     p = Path(fjson)
     if not p.exists():
@@ -491,6 +521,20 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     state["stage"] = "trim_align"
     reads = _trim_align(samples, paired, out, bundle, per_sample, par, runner, state["cleaned"])
     provenance["reads"] = reads
+
+    # Before counting, prove every sample's outputs are intact; re-process once.
+    state["stage"] = "integrity"
+    for s in samples:
+        problems = _sample_integrity(s.sample_id, paired, out, runner, threads)
+        if not problems:
+            continue
+        _remove_outputs(_final_paths(out, s.sample_id))
+        reads[s.sample_id] = _process_sample(s, paired, out, bundle, threads, runner,
+                                             cleaned=state["cleaned"])
+        reads[s.sample_id]["reprocessed_after_integrity"] = problems
+        again = _sample_integrity(s.sample_id, paired, out, runner, threads)
+        if again:
+            raise SampleError(s.sample_id, "integrity", "; ".join(again))
     align_logs = {s.sample_id: str(out / "04_align" / f"{s.sample_id}.bowtie2.log")
                   for s in samples}
     bams = [str(out / "04_align" / f"{s.sample_id}.bam") for s in samples]
