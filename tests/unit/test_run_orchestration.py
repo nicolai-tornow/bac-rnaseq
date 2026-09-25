@@ -27,7 +27,7 @@ def _setup(tmp_path, monkeypatch, qc=None, sheet=PE):
         "n_features": 4970, "seqids": ["NC_010397.1"], "fasta": "x", "gene_ids": [],
         "extra_ids": [], "structural": {}})
     monkeypatch.setattr(R, "_process_sample",
-                        lambda s, paired, out, bundle, threads, runner:
+                        lambda s, paired, out, bundle, threads, runner, **kw:
                         processed.append((s, paired, threads)) or {})
     monkeypatch.setattr(R, "_strand_check", lambda *a, **k: {})
     monkeypatch.setattr(R, "_ncrna_fracs", lambda *a, **k: {})

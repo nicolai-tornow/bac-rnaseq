@@ -4,7 +4,8 @@ import json
 import os
 import shutil
 import signal
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -14,7 +15,8 @@ from .contrasts import expand_contrasts
 from .build_refs import build_bundle, md5
 from . import commands as C
 from . import qc_triage, run_report, siteconfig
-from .procs import Cancelled, ProcRunner, as_runner
+from .procs import Cancelled, ProcRunner, Terminated, as_runner
+from .runlock import RunLock
 
 STRANDS = ("reverse", "forward", "unstranded")
 CORES_PER_SAMPLE = 8      # default split of the thread budget across parallel samples
@@ -232,7 +234,23 @@ def _fastp_stats(fjson) -> dict:
             "reads_passed": s["after_filtering"]["total_reads"]}
 
 
-def _strand_check(runner, saf, bams, threads, paired, out_dir, declared, main_summary):
+def _featurecounts(runner, tmp, cleaned=None, **kw):
+    """featureCounts with its temp files in a private folder that is removed
+    whether it succeeds or not (a crash would otherwise leave GBs of temp-core-*)."""
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    ok = False
+    try:
+        _check(runner, C.featurecounts_cmd(tmp_dir=str(tmp), **kw))
+        ok = True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if not ok and cleaned is not None:
+            cleaned.append(f"{tmp.parent.name}/{tmp.name}")
+
+
+def _strand_check(runner, saf, bams, threads, paired, out_dir, declared, main_summary,
+                  tmp=None, cleaned=None):
     """Assigned fraction per sample at all three -s settings."""
     per = {declared: qc_triage.parse_featurecounts_summary(main_summary)}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -240,8 +258,9 @@ def _strand_check(runner, saf, bams, threads, paired, out_dir, declared, main_su
         if st == declared:
             continue
         fc = out_dir / f"fc_{st}.txt"
-        _check(runner, C.featurecounts_cmd(saf, str(fc), bams, threads,
-                                           strandedness=st, paired=paired))
+        _featurecounts(runner, tmp or out_dir / ".featurecounts.partial", cleaned,
+                       saf=saf, out=str(fc), bams=bams, threads=threads,
+                       strandedness=st, paired=paired)
         per[st] = qc_triage.parse_featurecounts_summary(str(fc) + ".summary")
     samples = per[declared].keys()
     return {s: {st: per[st][s]["assigned_frac"] for st in STRANDS} for s in samples}
@@ -308,15 +327,92 @@ def _de_summary(results_dir, contrasts, padj, log2fc):
     return out
 
 
+_STAGING = ("02_trimmed/.*.partial", "04_align/.*.partial",
+            "05_counts/.featurecounts.partial", "06_deseq/.partial")
+_NO_HANDLER = object()
+
+
+def _sweep_staging(out) -> list[str]:
+    """Remove staging folders a killed run left behind."""
+    removed = []
+    for pat in _STAGING:
+        for p in sorted(Path(out).glob(pat)):
+            shutil.rmtree(p, ignore_errors=True)
+            removed.append(str(p.relative_to(out)))
+    return removed
+
+
+def _install_sigterm():
+    """SIGTERM raises Terminated in the main thread, so the run unwinds like on
+    Ctrl-C. Only the main thread can install a handler."""
+    if threading.current_thread() is not threading.main_thread():
+        return _NO_HANDLER
+    fired = []
+
+    def handler(signum, frame):
+        if not fired:
+            fired.append(signum)
+            raise Terminated(f"received signal {signum}")
+
+    return signal.signal(signal.SIGTERM, handler)
+
+
+def _restore_sigterm(prev):
+    if prev is not _NO_HANDLER:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL if prev is None else prev)
+
+
+def _promote_dir(src, dst):
+    """Move every entry of src into dst, replacing what is there."""
+    for p in list(Path(src).iterdir()):
+        target = Path(dst) / p.name
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        elif target.exists() or target.is_symlink():
+            target.unlink()
+        os.replace(p, target)
+
+
+def _trim_align(samples, paired, out, bundle, threads, par, runner, cleaned):
+    """Samples in parallel; the first failure cancels the rest (queued ones never
+    start, running ones are killed and remove their staging)."""
+    pool = ThreadPoolExecutor(max_workers=par)
+    futures = {pool.submit(_process_sample, s, paired, out, bundle, threads, runner,
+                           cleaned=cleaned): s.sample_id for s in samples}
+    reads = {}
+    try:
+        for f in as_completed(futures):
+            reads[futures[f]] = f.result()
+    except BaseException:
+        runner.cancel()
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return {s.sample_id: reads[s.sample_id] for s in samples}
+
+
+def _write_failed_report(out, config, state, exc):
+    failure = {"stage": state["stage"],
+               "step": getattr(exc, "step", None),
+               "sample": getattr(exc, "sample_id", None),
+               "error": f"{type(exc).__name__}: {exc}"[:4000],
+               "cleaned": sorted(set(state["cleaned"]))}
+    try:
+        rep = run_report.build_report(config.run_name, state["params"], {}, {}, [], {},
+                                      "failed", provenance=state["provenance"],
+                                      warnings=state["warnings"], failure=failure)
+        run_report.write_report(rep, out / "00_run_report.json")
+    except Exception as e:           # never hide the original error
+        exc.add_note(f"could not write the failed run report: {e}")
+
+
 def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
                  allow_qc_fail=False, check_files=True):
+    """Pre-flight errors and a live lock raise without touching the run folder's
+    report. Once the run holds the lock, any failure (incl. Ctrl-C and SIGTERM)
+    kills running tools, removes staging, writes a `failed` report and re-raises."""
     work_dir = Path(work_dir)
-    runner = ProcRunner() if runner is None else as_runner(runner)
     out = work_dir / "out" / config.run_name
-    for d in ["00_inputs", "01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align",
-              "05_counts", "06_deseq", "qc"]:
-        (out / d).mkdir(parents=True, exist_ok=True)
-
     samples = apply_layout(read_samplesheet(samplesheet_path), config.reads.layout)
     paired = is_paired(samples)
     conds = [s.condition for s in samples]
@@ -324,66 +420,107 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
     problems = check_samplesheet(samples, cons, check_files=check_files)
     if problems:
         raise ValueError("sample sheet problems:\n  " + "\n  ".join(problems))
+
+    runner = ProcRunner() if runner is None else as_runner(runner)
+    out.mkdir(parents=True, exist_ok=True)
+    lock = RunLock(out)
+    stale = lock.acquire()
+    state = {"stage": "setup", "cleaned": [], "params": {}, "warnings": [],
+             "provenance": {"plugin": run_report.plugin_version()}}
+    if stale is not None:
+        state["provenance"]["stale_lock_cleared"] = stale
+    prev = _install_sigterm()
+    try:
+        swept = _sweep_staging(out)
+        if swept:
+            state["provenance"]["stale_staging_removed"] = swept
+        return _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples,
+                           paired, cons, runner, allow_qc_fail, state)
+    except BaseException as e:
+        runner.cancel()
+        state["cleaned"] += _sweep_staging(out)
+        _write_failed_report(out, config, state, e)
+        raise
+    finally:
+        _restore_sigterm(prev)
+        lock.release()
+
+
+def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, paired, cons,
+                runner, allow_qc_fail, state):
+    for d in ["00_inputs", "01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align",
+              "05_counts", "06_deseq", "qc"]:
+        (out / d).mkdir(parents=True, exist_ok=True)
     strand = config.reference.strandedness
     threads = _threads(config)
+    par, per_sample = _parallelism(config, threads, len(samples))
+    params = {"strandedness": strand, "paired": paired, "layout": config.reads.layout,
+              "threads": threads, "parallel_samples": par,
+              "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail}
+    state["params"] = params
+    provenance = state["provenance"]
+    provenance["inputs"] = {"config": "00_inputs/config.yaml",
+                            "samplesheet": "00_inputs/samplesheet.tsv"}
 
     # Provenance: exactly what this run was given.
+    state["stage"] = "inputs"
     (out / "00_inputs" / "config.yaml").write_text(
         yaml.safe_dump(config.model_dump(), sort_keys=False))
     shutil.copyfile(samplesheet_path, out / "00_inputs" / "samplesheet.tsv")
 
+    state["stage"] = "refs"
     ref = config.reference
     bundle = build_bundle(ref.species, refs_root=refs_root,
                           out_dir=_bundle_dir(config, work_dir), threads=threads,
                           fasta=ref.fasta, gff=ref.gff, feature_types=tuple(ref.feature_types),
                           id_attribute=ref.id_attribute, exclude_seqids=ref.exclude_seqids,
                           seqid_map=ref.seqid_map, structural_rna=ref.structural_rna)
+    provenance["reference"] = {
+        "bundle_dir": str(_bundle_dir(config, work_dir)),
+        "reused": bundle.get("reused", False),
+        "fasta_md5": md5(bundle["fasta"]) if Path(bundle["fasta"]).exists() else None,
+        "gff_md5": bundle.get("stamp", {}).get("gff_md5"),
+        "structural_rna_md5": bundle.get("stamp", {}).get("structural_rna_md5"),
+        "saf_md5": bundle.get("saf_md5")}
 
+    state["stage"] = "fastqc_raw"
     fastqs = [f for s in samples for f in (s.fastq_r1, s.fastq_r2) if f]
     _check(runner, C.fastqc_cmd(fastqs, str(out / "01_qc_raw"), threads))
 
     # Trim + align several samples at once, splitting the thread budget.
-    par, per_sample = _parallelism(config, threads, len(samples))
-    with ThreadPoolExecutor(max_workers=par) as pool:
-        futures = {s.sample_id: pool.submit(_process_sample, s, paired, out, bundle,
-                                            per_sample, runner) for s in samples}
-        reads = {sid: f.result() for sid, f in futures.items()}   # re-raises a failure
+    state["stage"] = "trim_align"
+    reads = _trim_align(samples, paired, out, bundle, per_sample, par, runner, state["cleaned"])
+    provenance["reads"] = reads
     align_logs = {s.sample_id: str(out / "04_align" / f"{s.sample_id}.bowtie2.log")
                   for s in samples}
     bams = [str(out / "04_align" / f"{s.sample_id}.bam") for s in samples]
+
+    state["stage"] = "fastqc_trimmed"
     trimmed = sorted(str(p) for p in (out / "02_trimmed").glob("*.fq.gz"))
     if trimmed:
         _check(runner, C.fastqc_cmd(trimmed, str(out / "03_qc_trimmed"), threads))
 
+    state["stage"] = "featurecounts"
+    fc_tmp = out / "05_counts" / ".featurecounts.partial"
     fc = out / "05_counts" / "featurecounts.txt"
-    _check(runner, C.featurecounts_cmd(bundle["saf"], str(fc), bams, threads,
-                                       strandedness=strand, paired=paired))
+    _featurecounts(runner, fc_tmp, state["cleaned"], saf=bundle["saf"], out=str(fc),
+                   bams=bams, threads=threads, strandedness=strand, paired=paired)
     _reshape_counts(fc, out / "05_counts" / "counts.tsv",
                     keep_ids=set(bundle.get("gene_ids") or []) or None,
                     other_tsv=out / "05_counts" / "ncrna_counts.tsv")
+    state["stage"] = "strand_check"
     strand_fracs = _strand_check(runner, bundle["saf"], bams, threads, paired,
                                  out / "05_counts" / "strand_check", strand,
-                                 str(fc) + ".summary")
+                                 str(fc) + ".summary", tmp=fc_tmp, cleaned=state["cleaned"])
+    state["stage"] = "qc"
     ncrna = _ncrna_fracs(fc, bundle.get("structural", {}))
     qc = _collect_qc(align_logs, str(fc) + ".summary", strand_fracs, ncrna, strand)
+    state["stage"] = "multiqc"
     _check(runner, C.multiqc_cmd(str(out), str(out / "qc" / "multiqc")))
 
     invariants = {"strandedness": strand, "n_features": bundle["n_features"],
                   "seqids": bundle["seqids"],
                   "structural_rnas_added": bundle.get("extra_ids", [])}
-    params = {"strandedness": strand, "paired": paired, "layout": config.reads.layout,
-              "threads": threads, "parallel_samples": par,
-              "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail}
-    provenance = {"plugin": run_report.plugin_version(),
-                  "inputs": {"config": "00_inputs/config.yaml",
-                             "samplesheet": "00_inputs/samplesheet.tsv"},
-                  "reference": {"bundle_dir": str(_bundle_dir(config, work_dir)),
-                                "reused": bundle.get("reused", False),
-                                "fasta_md5": md5(bundle["fasta"]) if Path(bundle["fasta"]).exists() else None,
-                                "gff_md5": bundle.get("stamp", {}).get("gff_md5"),
-                                "structural_rna_md5": bundle.get("stamp", {}).get("structural_rna_md5"),
-                                "saf_md5": bundle.get("saf_md5")},
-                  "reads": reads}
     outputs = {"counts": "05_counts/counts.tsv", "ncrna_counts": "05_counts/ncrna_counts.tsv",
                "strand_check": "05_counts/strand_check", "multiqc": "qc/multiqc"}
 
@@ -391,25 +528,39 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
     failed = [sid for sid, v in qc.items() if v.get("verdict") == "FAIL"]
     if failed and not allow_qc_fail:
         rep = run_report.build_report(config.run_name, params, qc, invariants, [],
-                                      outputs, "qc_fail", provenance=provenance)
+                                      outputs, "qc_fail", provenance=provenance,
+                                      warnings=state["warnings"])
         run_report.write_report(rep, out / "00_run_report.json")
         return rep
 
-    use_batch = 1 if (config.design.batch_variable and any(s.batch for s in samples)) else 0
-    coldata = out / "06_deseq" / "coldata.tsv"
-    hdr = "sample\tcondition" + ("\tbatch" if use_batch else "") + "\n"
-    coldata.write_text(hdr + "".join(
-        f"{s.sample_id}\t{s.condition}" + (f"\t{s.batch}" if use_batch else "") + "\n"
-        for s in samples))
-    ctsv = out / "06_deseq" / "contrasts.tsv"
-    ctsv.write_text("".join(f"{c.name}\t{c.numerator}\t{c.denominator}\n" for c in cons))
-    _run_deseq2(runner, Path(__file__).parents[1] / "r" / "deseq2.R",
-                out / "05_counts" / "counts.tsv", coldata, ctsv, out / "06_deseq", use_batch)
+    # DESeq2 writes into a staging folder; results replace the old ones only on success.
+    state["stage"] = "deseq2"
+    dstage = out / "06_deseq" / ".partial"
+    shutil.rmtree(dstage, ignore_errors=True)
+    dstage.mkdir(parents=True)
+    ok = False
+    try:
+        use_batch = 1 if (config.design.batch_variable and any(s.batch for s in samples)) else 0
+        coldata = dstage / "coldata.tsv"
+        hdr = "sample\tcondition" + ("\tbatch" if use_batch else "") + "\n"
+        coldata.write_text(hdr + "".join(
+            f"{s.sample_id}\t{s.condition}" + (f"\t{s.batch}" if use_batch else "") + "\n"
+            for s in samples))
+        ctsv = dstage / "contrasts.tsv"
+        ctsv.write_text("".join(f"{c.name}\t{c.numerator}\t{c.denominator}\n" for c in cons))
+        _run_deseq2(runner, Path(__file__).parents[1] / "r" / "deseq2.R",
+                    out / "05_counts" / "counts.tsv", coldata, ctsv, dstage, use_batch)
+        _promote_dir(dstage, out / "06_deseq")
+        ok = True
+    finally:
+        shutil.rmtree(dstage, ignore_errors=True)
+        if not ok:
+            state["cleaned"].append("06_deseq/.partial")
 
     outputs["deseq"] = "06_deseq/results"
     rep = run_report.build_report(
         config.run_name, params, qc, invariants, [c.name for c in cons], outputs, "ok",
-        provenance=provenance,
+        provenance=provenance, warnings=state["warnings"],
         de_summary=_de_summary(out / "06_deseq" / "results", cons,
                                config.thresholds.padj, config.thresholds.log2fc))
     run_report.write_report(rep, out / "00_run_report.json")
