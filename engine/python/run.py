@@ -17,7 +17,7 @@ from .contrasts import expand_contrasts
 from .build_refs import build_bundle, md5
 from .checksums import check_md5s, expected_md5s, read_md5_manifest
 from . import commands as C
-from . import qc_triage, run_report, siteconfig
+from . import qc_triage, run_report, siteconfig, unaligned
 from .procs import Cancelled, ProcRunner, Terminated, as_runner
 from .runlock import RunLock
 
@@ -216,7 +216,9 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None, md5s=
 
         step = "bowtie2"
         log, bam = astage / f"{sid}.bowtie2.log", astage / f"{sid}.bam"
-        bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads, r2=str(t2) if t2 else None)
+        un = astage / (f"{sid}.unaligned_R%.fq.gz" if paired else f"{sid}.unaligned.fq.gz")
+        bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads,
+                            r2=str(t2) if t2 else None, un=str(un))
         sort = ["samtools", "sort", "-@", str(min(4, max(1, threads // 4))), "-m", SORT_MEM,
                 "-T", str(astage / "sort"), "-o", str(bam), "-"]
         res = runner.pipe(bt2, sort, stderr1=str(log))
@@ -238,6 +240,17 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None, md5s=
                 os.replace(src, out / "02_trimmed" / src.name)
         for src in (bam, Path(f"{bam}.bai"), log):
             os.replace(src, out / "04_align" / src.name)
+        # Unaligned reads are kept only for a sample that aligns poorly.
+        keep = out / "qc" / "unaligned" / sid
+        shutil.rmtree(keep, ignore_errors=True)
+        try:
+            pct = qc_triage.parse_bowtie2_log(fin["log"].read_text())
+        except ValueError:
+            pct = None
+        if pct is not None and pct < qc_triage.ALIGN_WARN:
+            keep.mkdir(parents=True)
+            for src in astage.glob(f"{sid}.unaligned*.fq.gz"):
+                os.replace(src, keep / src.name)
         marker = {"schema": 1, "sample_id": sid,
                   "created": datetime.now(timezone.utc).isoformat(),
                   "plugin_commit": _plugin_commit(), "bam_md5": md5(fin["bam"]),
@@ -666,6 +679,15 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     state["stage"] = "qc"
     ncrna = _ncrna_fracs(fc, bundle.get("structural", {}))
     qc = _collect_qc(align_logs, str(fc) + ".summary", strand_fracs, ncrna, strand)
+    state["stage"] = "unaligned"
+    cache = {}
+    for sid, v in qc.items():
+        if v.get("alignment_pct", 100.0) < qc_triage.ALIGN_WARN:
+            v["unaligned"] = unaligned.diagnose(sid, out, bundle, runner, threads, cache)
+            if v["unaligned"] is None:
+                v["unaligned_note"] = (
+                    "unaligned reads were not captured (the sample was resumed from an "
+                    f"earlier run); delete 04_align/{sid}.done.json and re-run to capture them")
     state["stage"] = "multiqc"
     mq_cfg, mq_names = _multiqc_config(out, samples)
     _check(runner, C.multiqc_cmd(str(out), str(out / "qc" / "multiqc"), config=str(mq_cfg),

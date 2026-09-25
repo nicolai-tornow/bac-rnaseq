@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 
 _ORDER = {"PASS": 0, "WARN": 1, "FAIL": 2}
+ALIGN_FAIL = 90.0     # alignment rate (%) below which a sample FAILs
+ALIGN_WARN = 95.0     # ... WARNs; below this its unaligned reads are also kept and characterized
 _FLAG = {"reverse": "-s 2", "forward": "-s 1", "unstranded": "-s 0"}
 
 
@@ -104,10 +106,10 @@ def triage_sample(align_pct, assigned_frac, ncrna_frac, strand=None,
     def worse(v):
         return v if _ORDER[v] > _ORDER[verdict] else verdict
 
-    if align_pct < 90:
-        verdict = worse("FAIL"); reasons.append(f"alignment {align_pct:.1f}% < 90%")
-    elif align_pct < 95:
-        verdict = worse("WARN"); reasons.append(f"alignment {align_pct:.1f}% < 95%")
+    if align_pct < ALIGN_FAIL:
+        verdict = worse("FAIL"); reasons.append(f"alignment {align_pct:.1f}% < {ALIGN_FAIL:g}%")
+    elif align_pct < ALIGN_WARN:
+        verdict = worse("WARN"); reasons.append(f"alignment {align_pct:.1f}% < {ALIGN_WARN:g}%")
 
     strand_ok = strand is not None and strand["verdict"] == "PASS"
     if strand is not None and strand["verdict"] != "PASS":

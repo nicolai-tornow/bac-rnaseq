@@ -66,6 +66,11 @@ class FakeTools:
         return Result(0)
 
     def _bowtie2(self, cmd, input):
+        if _arg(cmd, "--un-conc-gz"):          # 3 unaligned pairs
+            for m in ("1", "2"):
+                write_fastq_gz(_arg(cmd, "--un-conc-gz").replace("%", m), 3, seq="GGCCAATT")
+        if _arg(cmd, "--un-gz"):
+            write_fastq_gz(_arg(cmd, "--un-gz"), 3, seq="GGCCAATT")
         return Result(0, "", f"{self.align_pct:.2f}% overall alignment rate\n")
 
     def _samtools_sort(self, cmd, input):
