@@ -1,8 +1,12 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 import shutil
+import signal
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 import yaml
 from .samplesheet import read_samplesheet, is_paired, apply_layout, check_samplesheet
@@ -10,7 +14,7 @@ from .contrasts import expand_contrasts
 from .build_refs import build_bundle, md5
 from . import commands as C
 from . import qc_triage, run_report, siteconfig
-from .procs import ProcRunner, as_runner
+from .procs import Cancelled, ProcRunner, as_runner
 
 STRANDS = ("reverse", "forward", "unstranded")
 CORES_PER_SAMPLE = 8      # default split of the thread budget across parallel samples
@@ -62,43 +66,161 @@ def _count_reads(runner, fastq):
     return int(txt) // 4 if txt else None
 
 
-def _process_sample(s, paired, out, bundle, threads, runner):
-    """fastp -> bowtie2 -> sorted BAM. Skips a sample whose BAM already passes
-    samtools quickcheck (resume after a qc_fail or an interrupted run)."""
-    t1 = out / "02_trimmed" / f"{s.sample_id}_R1.fq.gz"
-    t2 = out / "02_trimmed" / f"{s.sample_id}_R2.fq.gz" if paired else None
-    fjson = out / "02_trimmed" / f"{s.sample_id}.json"
-    bam = out / "04_align" / f"{s.sample_id}.bam"
-    log = out / "04_align" / f"{s.sample_id}.bowtie2.log"
-    if bam.exists() and log.exists() and fjson.exists() and \
-            runner.run(["samtools", "quickcheck", str(bam)]).returncode == 0:
-        return {"resumed": True, **_fastp_stats(fjson)}
+class SampleError(RuntimeError):
+    """A sample failed at `step` (fastp, bowtie2, sort, index, promote, integrity)."""
 
-    # fastp can stop early on a truncated/corrupt input and still exit 0, so
-    # compare what it read with the raw read count.
-    raw = _count_reads(runner, s.fastq_r1)
-    _check(runner, C.fastp_cmd(s.fastq_r1, str(t1), threads,
-                               r2=s.fastq_r2, out2=str(t2) if t2 else None,
-                               json=str(fjson), html=str(fjson.with_suffix(".html"))))
-    stats = _fastp_stats(fjson)
-    expected = raw * (2 if paired else 1) if raw is not None else None
-    if expected is not None and stats.get("reads_in") is not None and stats["reads_in"] != expected:
-        raise RuntimeError(f"{s.sample_id}: fastp read {stats['reads_in']} reads but the "
-                           f"input has {expected}; the FASTQ may be truncated or corrupt")
-    stats["raw_reads"] = expected
+    def __init__(self, sample_id, step, message):
+        super().__init__(f"{sample_id}: {step} failed: {message}")
+        self.sample_id, self.step, self.message = sample_id, step, message
 
-    sam = out / "04_align" / f"{s.sample_id}.sam"
-    bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads, r2=str(t2) if t2 else None)
-    res = runner.run(bt2 + ["-S", str(sam)])
-    Path(log).write_text(res.stderr)
-    if res.returncode != 0:
-        raise RuntimeError(f"stage failed: bowtie2 ({s.sample_id}); see {log}")
-    _check(runner, ["samtools", "sort", "-@", str(threads), "-m", SORT_MEM,
-                    "-o", str(bam), str(sam)])
-    _check(runner, ["samtools", "index", str(bam)])
-    _check(runner, ["samtools", "quickcheck", str(bam)])
-    sam.unlink(missing_ok=True)
-    return {"resumed": False, **stats}
+
+_SIGPIPE = (-signal.SIGPIPE, 128 + signal.SIGPIPE)
+
+
+@lru_cache(maxsize=1)
+def _plugin_commit():
+    return run_report.plugin_version().get("commit")
+
+
+def _final_paths(out, sid) -> dict:
+    t, a = Path(out) / "02_trimmed", Path(out) / "04_align"
+    return {"r1": t / f"{sid}_R1.fq.gz", "r2": t / f"{sid}_R2.fq.gz", "json": t / f"{sid}.json",
+            "html": t / f"{sid}.html", "bam": a / f"{sid}.bam", "bai": a / f"{sid}.bam.bai",
+            "log": a / f"{sid}.bowtie2.log", "marker": a / f"{sid}.done.json",
+            "sam": a / f"{sid}.sam"}
+
+
+def _remove_outputs(fin):
+    """Marker first: a sample without a marker is never trusted."""
+    for k in ("marker", "bam", "bai", "log", "sam", "r1", "r2", "json", "html"):
+        fin[k].unlink(missing_ok=True)
+
+
+def _fastq_id(path):
+    if not path:
+        return None
+    rp = os.path.realpath(path)
+    try:
+        st = os.stat(rp)
+        return {"path": rp, "size": st.st_size, "mtime": st.st_mtime}
+    except OSError:
+        return {"path": rp, "size": None, "mtime": None}
+
+
+def _sample_inputs(s, paired, bundle) -> dict:
+    """What a sample's BAM was made from; any change makes the sample re-run."""
+    return {"fastq_r1": _fastq_id(s.fastq_r1), "fastq_r2": _fastq_id(s.fastq_r2),
+            "paired": paired,
+            "reference_fasta_md5": (bundle.get("stamp") or {}).get("fasta_md5"),
+            "fastp_args": list(C.FASTP_SETTINGS), "bowtie2_args": list(C.BOWTIE2_SETTINGS)}
+
+
+def _marker_valid(fin, inputs) -> tuple[bool, str]:
+    if not fin["marker"].exists():
+        return False, "no completion marker"
+    try:
+        m = json.loads(fin["marker"].read_text())
+    except ValueError:
+        return False, "unreadable completion marker"
+    if m.get("schema") != 1:
+        return False, "unknown completion marker schema"
+    if m.get("inputs") != inputs:
+        return False, "inputs changed since the sample was processed"
+    if not fin["bam"].exists():
+        return False, "BAM missing"
+    if _fastp_stats(fin["json"]).get("reads_passed") != m.get("reads_passed"):
+        return False, "fastp report does not match the completion marker"
+    if md5(fin["bam"]) != m.get("bam_md5"):
+        return False, "BAM changed since the sample was processed"
+    return True, ""
+
+
+def _tail(path, n=15) -> str:
+    p = Path(path)
+    return "\n".join(p.read_text(errors="replace").splitlines()[-n:]) if p.exists() else ""
+
+
+def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None):
+    """fastp -> bowtie2 | samtools sort into staging folders; outputs are moved into
+    place only after every check passed, and the completion marker is written last.
+    A sample with a valid marker is skipped (its trimmed reads need not exist)."""
+    sid = s.sample_id
+    fin = _final_paths(out, sid)
+    inputs = _sample_inputs(s, paired, bundle)
+    ok, why = _marker_valid(fin, inputs)
+    if ok:
+        if not fin["bai"].exists():
+            _check(runner, ["samtools", "index", str(fin["bam"])])
+        return {"resumed": True, **_fastp_stats(fin["json"])}
+
+    _remove_outputs(fin)
+    tstage = out / "02_trimmed" / f".{sid}.partial"
+    astage = out / "04_align" / f".{sid}.partial"
+    for d in (tstage, astage):
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True)
+    step, done = "fastp", False
+    try:
+        t1 = tstage / f"{sid}_R1.fq.gz"
+        t2 = tstage / f"{sid}_R2.fq.gz" if paired else None
+        fjson = tstage / f"{sid}.json"
+        # fastp can stop early on a truncated/corrupt input and still exit 0, so
+        # compare what it read with the raw read count.
+        raw = _count_reads(runner, s.fastq_r1)
+        _check(runner, C.fastp_cmd(s.fastq_r1, str(t1), threads,
+                                   r2=s.fastq_r2, out2=str(t2) if t2 else None,
+                                   json=str(fjson), html=str(fjson.with_suffix(".html"))))
+        stats = _fastp_stats(fjson)
+        expected = raw * (2 if paired else 1) if raw is not None else None
+        if expected is not None and stats.get("reads_in") is not None and stats["reads_in"] != expected:
+            raise RuntimeError(f"fastp read {stats['reads_in']} reads but the input has "
+                               f"{expected}; the FASTQ may be truncated or corrupt")
+        stats["raw_reads"] = expected
+
+        step = "bowtie2"
+        log, bam = astage / f"{sid}.bowtie2.log", astage / f"{sid}.bam"
+        bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads, r2=str(t2) if t2 else None)
+        sort = ["samtools", "sort", "-@", str(min(4, max(1, threads // 4))), "-m", SORT_MEM,
+                "-T", str(astage / "sort"), "-o", str(bam), "-"]
+        res = runner.pipe(bt2, sort, stderr1=str(log))
+        if res.rc1 != 0 and not (res.rc2 != 0 and res.rc1 in _SIGPIPE):
+            raise RuntimeError(f"bowtie2 exited {res.rc1}:\n{_tail(log)}")
+        if res.rc2 != 0:
+            step = "sort"
+            raise RuntimeError(f"samtools sort exited {res.rc2}: {res.stderr.strip()[-800:]}")
+
+        step = "index"
+        _check(runner, ["samtools", "index", str(bam)])
+        _check(runner, ["samtools", "quickcheck", str(bam)])
+        records = int(_check(runner, ["samtools", "view", "-c", "-@", str(threads),
+                                      str(bam)]).stdout.strip())
+
+        step = "promote"
+        for src in (t1, t2, fjson, fjson.with_suffix(".html")):
+            if src is not None and src.exists():
+                os.replace(src, out / "02_trimmed" / src.name)
+        for src in (bam, Path(f"{bam}.bai"), log):
+            os.replace(src, out / "04_align" / src.name)
+        marker = {"schema": 1, "sample_id": sid,
+                  "created": datetime.now(timezone.utc).isoformat(),
+                  "plugin_commit": _plugin_commit(), "bam_md5": md5(fin["bam"]),
+                  "bam_records": records, "reads_passed": stats.get("reads_passed"),
+                  "inputs": inputs}
+        tmp = astage / "done.json"
+        tmp.write_text(json.dumps(marker, indent=1))
+        os.replace(tmp, fin["marker"])
+        done = True
+        return {"resumed": False, "resume_skipped": why, **stats}
+    except Cancelled:
+        raise
+    except Exception as e:
+        raise SampleError(sid, step, str(e)) from e
+    finally:
+        for d in (tstage, astage):
+            if d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+                if not done and cleaned is not None:
+                    cleaned.append(str(d.relative_to(out)))
 
 
 def _fastp_stats(fjson) -> dict:
