@@ -28,8 +28,9 @@ def _genome():
 
 
 def test_rrna_like_fraction_on_mutated_rrna(tmp_path):
+    tmp_path = tmp_path / "a b,c"          # space and comma: -U takes a comma list
     bundle_dir = tmp_path / "bundle"
-    bundle_dir.mkdir()
+    bundle_dir.mkdir(parents=True)
     os.symlink(REFS / "mabs/NC_010397.1.fasta", bundle_dir / "genome.fasta")
     saf = bundle_dir / "labels.saf"
     saf.write_text("GeneID\tChr\tStart\tEnd\tStrand\n" +

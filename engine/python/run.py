@@ -1,4 +1,5 @@
 from __future__ import annotations
+import gzip
 import hashlib
 import json
 import os
@@ -216,7 +217,7 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None, md5s=
 
         step = "bowtie2"
         log, bam = astage / f"{sid}.bowtie2.log", astage / f"{sid}.bam"
-        un = astage / (f"{sid}.unaligned_R%.fq.gz" if paired else f"{sid}.unaligned.fq.gz")
+        un = astage / (f"{sid}.unaligned_R%.fq" if paired else f"{sid}.unaligned.fq")
         bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads,
                             r2=str(t2) if t2 else None, un=str(un))
         sort = ["samtools", "sort", "-@", str(min(4, max(1, threads // 4))), "-m", SORT_MEM,
@@ -249,8 +250,10 @@ def _process_sample(s, paired, out, bundle, threads, runner, cleaned=None, md5s=
             pct = None
         if pct is not None and pct < qc_triage.ALIGN_WARN:
             keep.mkdir(parents=True)
-            for src in astage.glob(f"{sid}.unaligned*.fq.gz"):
-                os.replace(src, keep / src.name)
+            for src in sorted(astage.glob(f"{sid}.unaligned*.fq")):
+                with open(src, "rb") as fi, gzip.open(keep / f"{src.name}.gz", "wb",
+                                                      compresslevel=6) as fo:
+                    shutil.copyfileobj(fi, fo, 1 << 20)
         marker = {"schema": 1, "sample_id": sid,
                   "created": datetime.now(timezone.utc).isoformat(),
                   "plugin_commit": _plugin_commit(), "bam_md5": md5(fin["bam"]),
@@ -405,7 +408,9 @@ def _multiqc_config(out, samples):
     qc.mkdir(parents=True, exist_ok=True)
     cfg = {"use_filename_as_sample_name": ["fastp"],
            "extra_fn_clean_exts": [".bowtie2"],
-           "fn_ignore_dirs": ["strand_check", "*.partial"],
+           # replaces MultiQC's own list, so its defaults are repeated: without
+           # multiqc_data every re-run reads the previous report back in
+           "fn_ignore_dirs": ["multiqc_data", ".git", "strand_check", "*.partial"],
            "table_sample_merge": {"R1": "_R1", "R2": "_R2"},
            "module_order": [
                {"fastqc": {"name": "FastQC (raw)", "anchor": "fastqc_raw",
@@ -689,7 +694,14 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     cache = {}
     for sid, v in qc.items():
         if v.get("alignment_pct", 100.0) < qc_triage.ALIGN_WARN:
-            v["unaligned"] = unaligned.diagnose(sid, out, bundle, runner, threads, cache)
+            try:
+                v["unaligned"] = unaligned.diagnose(sid, out, bundle, runner, threads, cache)
+            except Cancelled:
+                raise
+            except Exception as e:     # a diagnostic must not cost the user the DE results
+                v["unaligned"] = None
+                v["unaligned_note"] = f"unaligned-read diagnostics failed: {e}"
+                continue
             if v["unaligned"] is None:
                 v["unaligned_note"] = (
                     "unaligned reads were not captured (the sample was resumed from an "

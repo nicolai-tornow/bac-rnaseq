@@ -96,6 +96,9 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     rep2 = R.run_pipeline(cfg, tmp_path, None, ss)
     assert all(r["resumed"] for r in rep2["provenance"]["reads"].values())
     assert rep2["provenance"]["reference"]["reused"] is True
+    # ... and MultiQC does not read the previous report back in.
+    rows = [l.split("\t")[0] for l in (mq / "multiqc_general_stats.txt").read_text().splitlines()[1:]]
+    assert sorted(rows) == sorted(names)
 
 
 def test_cleanup_then_rerun_regenerates_what_it_needs(tmp_path, monkeypatch):
@@ -130,3 +133,20 @@ def test_cleanup_then_rerun_regenerates_what_it_needs(tmp_path, monkeypatch):
     assert len(rep["cleanup"]) == 2
     raw = list(ss.parent.glob("raw*_*.fastq.gz"))
     assert len(raw) == 8 and all(f.stat().st_size > 0 for f in raw)   # raw FASTQs untouched
+
+
+def test_work_dir_with_a_space_on_real_reads(tmp_path, monkeypatch):
+    """Every tool, including bowtie2's wrapper for the unaligned-read files, gets a
+    path with a space; nothing may be written outside the work dir."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(R, "_run_deseq2", lambda *a, **k: None)
+    work = tmp_path / "my work"
+    work.mkdir()
+    ss = _split_fixture(work, n=2)
+    cfg = load_config({"run_name": "sp", "reference": {"species": "mabs"},
+                       "resources": {"threads": 4},
+                       "contrasts": {"explicit": [{"name": "B_vs_A", "numerator": "B",
+                                                   "denominator": "A"}]}})
+    rep = R.run_pipeline(cfg, work, None, ss)
+    assert rep["status"] == "ok"
+    assert set(p.name for p in tmp_path.iterdir()) <= {"my work", "xdg"}

@@ -43,21 +43,24 @@ def rrna_index(bundle, dst, runner) -> str | None:
         raise RuntimeError(f"samtools faidx of the rRNA genes failed: {res.stderr.strip()}")
     (dst / "rrna.fa").write_text(res.stdout)
     prefix = dst / "rrna"
-    res = runner.run(["bowtie2-build", "--quiet", str(dst / "rrna.fa"), str(prefix)])
+    # bowtie2-build splits its input on commas: run it inside dst with plain names
+    res = runner.run(["bowtie2-build", "--quiet", "rrna.fa", "rrna"], cwd=str(dst))
     if res.returncode != 0:
         raise RuntimeError(f"bowtie2-build of the rRNA genes failed: {res.stderr.strip()}")
     return str(prefix)
 
 
 def rrna_like_fraction(index, paths, runner, threads) -> float:
+    """Reads go in on stdin: bowtie2 splits -U on commas."""
     # A 15-nt seed with one mismatch finds ~100% of reads at 8-12% divergence from the
     # reference rRNA (--very-sensitive-local alone: 81% / 51%) and still 0% of random
     # sequence.
-    res = runner.run(["bowtie2", "-x", index, "--very-sensitive-local", "-N", "1", "-L", "15",
-                      "--no-unal",
-                      "-p", str(threads), "-U", ",".join(map(str, paths)), "-S", os.devnull])
-    if res.returncode != 0:
-        raise RuntimeError(f"bowtie2 against the rRNA genes failed: {res.stderr.strip()}")
+    res = runner.pipe(["gzip", "-cd", *map(str, paths)],
+                      ["bowtie2", "-x", index, "--very-sensitive-local", "-N", "1", "-L", "15",
+                       "--no-unal", "-p", str(threads), "-U", "-", "-S", os.devnull])
+    if res.rc1 != 0 or res.rc2 != 0:
+        raise RuntimeError("bowtie2 against the rRNA genes failed: "
+                           f"{(res.stderr or res.stderr1).strip()}")
     return round(qc_triage.parse_bowtie2_log(res.stderr) / 100, 4)
 
 

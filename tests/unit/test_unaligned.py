@@ -22,13 +22,16 @@ def _sample(tmp_path, paired=True):
     return s, out
 
 
-@pytest.mark.parametrize("paired,flag", [(True, "--un-conc-gz"), (False, "--un-gz")])
+@pytest.mark.parametrize("paired,flag", [(True, "--un-conc"), (False, "--un")])
 def test_bowtie2_captures_unaligned_reads(tmp_path, paired, flag):
     s, out = _sample(tmp_path, paired)
     tools = FakeTools()
     R._process_sample(s, paired, out, B, 2, CallableRunner(tools))
     bt = tools.called("bowtie2")[0]
     assert ".s1.partial" in bt[bt.index(flag) + 1]
+    # uncompressed: bowtie2's wrapper pipes the -gz variants through an unquoted shell
+    # command, which breaks (and can write outside the run) on a path with a space
+    assert not any(a.startswith("--un") and a.endswith("-gz") for a in bt)
     marker = (out / "04_align/s1.done.json").read_text()
     assert "--un" not in marker                      # output-only flag: not in the fingerprint
     assert C.bowtie2_cmd("i", "r1", 1) == C.bowtie2_cmd("i", "r1", 1, un=None)
@@ -37,8 +40,9 @@ def test_bowtie2_captures_unaligned_reads(tmp_path, paired, flag):
 def test_unaligned_reads_kept_only_below_95_percent(tmp_path):
     s, out = _sample(tmp_path)
     R._process_sample(s, True, out, B, 2, CallableRunner(FakeTools(align_pct=80.0)))
-    kept = sorted(p.name for p in (out / "qc/unaligned/s1").iterdir())
-    assert kept == ["s1.unaligned_R1.fq.gz", "s1.unaligned_R2.fq.gz"]
+    kept = sorted((out / "qc/unaligned/s1").iterdir())
+    assert [p.name for p in kept] == ["s1.unaligned_R1.fq.gz", "s1.unaligned_R2.fq.gz"]
+    assert U.gc_and_count([str(p) for p in kept])[0] == 6          # gzip, readable
     (out / "04_align/s1.done.json").unlink()          # re-process; now it aligns well
     R._process_sample(s, True, out, B, 2, CallableRunner(FakeTools(align_pct=97.0)))
     assert not (out / "qc/unaligned/s1").exists()
@@ -65,3 +69,23 @@ def test_weak_sample_gets_diagnostics_and_a_note_when_resumed(env, monkeypatch):
     rep = _run(env, FakeTools(align_pct=80.0))                    # s0 resumes: nothing captured
     assert rep["samples_qc"]["s0"]["unaligned"] is None
     assert "done.json" in rep["samples_qc"]["s0"]["unaligned_note"]
+
+
+def test_failing_diagnostics_do_not_fail_the_run(env, monkeypatch):
+    monkeypatch.setattr(R, "_collect_qc", lambda *a, **k: {
+        "s0": {"verdict": "WARN", "reasons": [], "alignment_pct": 80.0}})
+
+    def boom(*a, **k):
+        raise RuntimeError("samtools faidx of the rRNA genes failed")
+    monkeypatch.setattr(U, "diagnose", boom)
+    rep = _run(env, FakeTools(align_pct=80.0))
+    assert rep["status"] == "ok"
+    assert rep["samples_qc"]["s0"]["unaligned"] is None
+    assert "faidx" in rep["samples_qc"]["s0"]["unaligned_note"]
+
+
+def test_multiqc_config_keeps_multiqc_default_ignores(tmp_path):
+    import yaml
+    cfg, _ = R._multiqc_config(tmp_path, [Sample("s1", "/d/a.fq.gz", "c")])
+    ignore = yaml.safe_load(cfg.read_text())["fn_ignore_dirs"]
+    assert {"multiqc_data", ".git", "strand_check"} <= set(ignore)

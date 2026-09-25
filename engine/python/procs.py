@@ -76,8 +76,8 @@ class ProcRunner:
                 p.kill()
                 p.wait()
 
-    def run(self, cmd) -> Result:
-        p = self._start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    def run(self, cmd, cwd=None) -> Result:
+        p = self._start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
         try:
             out, err = p.communicate()
         except BaseException:
@@ -151,9 +151,10 @@ class CallableRunner:
         if self.cancelled.is_set():
             raise Cancelled(cmd[0])
 
-    def run(self, cmd) -> Result:
+    def run(self, cmd, cwd=None) -> Result:
         self._guard(cmd)
-        return _as_result(self.fn(cmd, capture_output=True, text=True))
+        return _as_result(self.fn(cmd, capture_output=True, text=True,
+                                  **({"cwd": cwd} if cwd else {})))
 
     def pipe(self, cmd1, cmd2, stderr1=None) -> PipeResult:
         r1 = self.run(cmd1)
