@@ -62,3 +62,47 @@ def test_as_runner_wraps_callables_only():
     real = procs.ProcRunner()
     assert procs.as_runner(real) is real
     assert isinstance(procs.as_runner(lambda cmd, **kw: None), procs.CallableRunner)
+
+
+import os  # noqa: E402
+import signal  # noqa: E402
+
+
+def _term_soon(delay=0.5):
+    t = threading.Timer(delay, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    t.start()
+    return t
+
+
+@pytest.fixture
+def raising_sigterm():
+    def handler(signum, frame):
+        raise procs.Terminated("test")
+    prev = signal.signal(signal.SIGTERM, handler)
+    yield
+    signal.signal(signal.SIGTERM, prev)
+
+
+def _gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def test_interrupted_run_kills_its_own_child(tmp_path, raising_sigterm):
+    pidf = tmp_path / "pid"
+    _term_soon()
+    with pytest.raises(procs.Terminated):
+        procs.ProcRunner(grace=2).run(["sh", "-c", f"echo $$ > '{pidf}'; exec sleep 30"])
+    assert _gone(int(pidf.read_text()))
+
+
+def test_interrupted_pipe_kills_both_children(tmp_path, raising_sigterm):
+    p1, p2 = tmp_path / "p1", tmp_path / "p2"
+    _term_soon()
+    with pytest.raises(procs.Terminated):
+        procs.ProcRunner(grace=2).pipe(["sh", "-c", f"echo $$ > '{p1}'; exec sleep 30"],
+                                       ["sh", "-c", f"echo $$ > '{p2}'; exec cat"])
+    assert _gone(int(p1.read_text())) and _gone(int(p2.read_text()))

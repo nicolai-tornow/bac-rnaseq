@@ -59,10 +59,30 @@ class ProcRunner:
             for p in ps:
                 self._live.discard(p)
 
+    def _stop(self, *ps):
+        """SIGTERM, then SIGKILL after `grace`, and reap: used when the waiting thread
+        is interrupted (Ctrl-C, SIGTERM), so no child outlives its call."""
+        for p in ps:
+            if p.poll() is None:
+                try:
+                    p.terminate()
+                except OSError:
+                    pass
+        deadline = time.monotonic() + self.grace
+        for p in ps:
+            try:
+                p.wait(max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
     def run(self, cmd) -> Result:
         p = self._start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             out, err = p.communicate()
+        except BaseException:
+            self._stop(p)
+            raise
         finally:
             self._done(p)
         return Result(p.returncode, _text(out), _text(err))
@@ -81,8 +101,12 @@ class ProcRunner:
                 p1.wait()
                 raise
             p1.stdout.close()          # cmd1 gets SIGPIPE if cmd2 exits early
-            out, err = p2.communicate()
-            rc1 = p1.wait()
+            try:
+                out, err = p2.communicate()
+                rc1 = p1.wait()
+            except BaseException:
+                self._stop(p1, p2)
+                raise
             s1 = ""
             if not stderr1:
                 err1.seek(0)
