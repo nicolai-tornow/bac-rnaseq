@@ -374,6 +374,45 @@ def _ncrna_fracs(fc_txt, structural_classes):
     return qc_triage.ncrna_fractions(df, structural_classes)
 
 
+def _fastq_stem(path) -> str:
+    """The name MultiQC gives a FastQC report of this FASTQ."""
+    name = Path(path).name
+    for ext in (".gz", ".bz2"):
+        name = name[: -len(ext)] if name.endswith(ext) else name
+    for ext in (".fastq", ".fq"):
+        name = name[: -len(ext)] if name.endswith(ext) else name
+    return name
+
+
+def _multiqc_config(out, samples):
+    """One General Statistics row per sample ID: fastp named by its <sid>.json, raw
+    FastQC renamed to <sid>_R1/_R2, R1/R2 rows grouped, and the strand-check
+    featureCounts summaries (same sample names) kept out."""
+    qc = Path(out) / "qc"
+    qc.mkdir(parents=True, exist_ok=True)
+    cfg = {"use_filename_as_sample_name": ["fastp"],
+           "extra_fn_clean_exts": [".bowtie2"],
+           "fn_ignore_dirs": ["strand_check", "*.partial"],
+           "table_sample_merge": {"R1": "_R1", "R2": "_R2"},
+           "module_order": [
+               {"fastqc": {"name": "FastQC (raw)", "anchor": "fastqc_raw",
+                           "path_filters": ["*/01_qc_raw/*"]}},
+               {"fastqc": {"name": "FastQC (trimmed)", "anchor": "fastqc_trimmed",
+                           "path_filters": ["*/03_qc_trimmed/*"]}},
+               "fastp", "bowtie2", "featurecounts"]}
+    targets: dict = {}
+    for s in samples:
+        for f, mate in ((s.fastq_r1, "R1"), (s.fastq_r2, "R2")):
+            if f:
+                targets.setdefault(_fastq_stem(f), set()).add(f"{s.sample_id}_{mate}")
+    rows = [f"{stem}\t{next(iter(t))}\n" for stem, t in sorted(targets.items())
+            if len(t) == 1 and stem != next(iter(t))]     # a file shared by samples stays as is
+    cfg_path, names = qc / "multiqc_config.yaml", qc / "multiqc_names.tsv"
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    names.write_text("".join(rows))
+    return cfg_path, names
+
+
 def _de_summary(results_dir, contrasts, padj, log2fc):
     import pandas as pd
     out = {}
@@ -628,7 +667,9 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     ncrna = _ncrna_fracs(fc, bundle.get("structural", {}))
     qc = _collect_qc(align_logs, str(fc) + ".summary", strand_fracs, ncrna, strand)
     state["stage"] = "multiqc"
-    _check(runner, C.multiqc_cmd(str(out), str(out / "qc" / "multiqc")))
+    mq_cfg, mq_names = _multiqc_config(out, samples)
+    _check(runner, C.multiqc_cmd(str(out), str(out / "qc" / "multiqc"), config=str(mq_cfg),
+                                 replace_names=str(mq_names) if mq_names.read_text() else None))
 
     invariants = {"strandedness": strand, "n_features": bundle["n_features"],
                   "seqids": bundle["seqids"],

@@ -11,6 +11,7 @@ import subprocess
 import pytest
 from engine.python.config import load_config
 from engine.python import run as R
+from engine.python import qc_triage
 from tests.testdata import READS_R1, READS_R2
 
 TOOLS = ["fastp", "fastqc", "multiqc", "bowtie2", "samtools", "featureCounts"]
@@ -23,10 +24,10 @@ def _split_fixture(dst, n=4, pairs=5000):
     for m, src in ((1, READS_R1), (2, READS_R2)):
         lines = gzip.open(src, "rt").read().splitlines(True)
         for i in range(n):
-            with gzip.open(dst / f"s{i}_R{m}.fq.gz", "wt") as fh:
+            with gzip.open(dst / f"raw{i}_{m}.fastq.gz", "wt") as fh:
                 fh.writelines(lines[i * pairs * 4:(i + 1) * pairs * 4])
     for i in range(n):
-        rows.append(f"s{i}\t{dst}/s{i}_R1.fq.gz\t{dst}/s{i}_R2.fq.gz\t{'A' if i < n // 2 else 'B'}")
+        rows.append(f"s{i}\t{dst}/raw{i}_1.fastq.gz\t{dst}/raw{i}_2.fastq.gz\t{'A' if i < n // 2 else 'B'}")
     (dst / "ss.tsv").write_text("\n".join(rows) + "\n")
     return dst / "ss.tsv"
 
@@ -71,6 +72,22 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     assert (out / "qc/multiqc/multiqc_report.html").exists()
     assert list((out / "01_qc_raw").glob("*_fastqc.html"))
     assert list((out / "03_qc_trimmed").glob("*_fastqc.html"))
+    # MultiQC: one General Statistics row per sample ID (R1/R2 grouped under it), and
+    # the strand-check summaries do not overwrite the real featureCounts numbers.
+    mq = out / "qc/multiqc/multiqc_data"
+    names = [l.split("\t")[0] for l in (mq / "multiqc_general_stats.txt").read_text().splitlines()[1:]]
+    sids = {f"s{i}" for i in range(4)}
+    assert {n for n in names if n in sids} == sids
+    assert all(n in sids or n[:-3] in sids and n[-3:] in ("_R1", "_R2", " R1", " R2")
+               for n in names), names                 # R1/R2 sub-rows of a sample
+    assert "Duplicate sample name" not in (mq / "multiqc.log").read_text()
+    fc_mq = {l.split("\t")[0]: l.split("\t")[2] for l in
+             (mq / "multiqc_featurecounts.txt").read_text().splitlines()[1:]}
+    fc_main = dict(zip((out / "05_counts/featurecounts.txt.summary").read_text().splitlines()[0].split("\t")[1:],
+                       (out / "05_counts/featurecounts.txt.summary").read_text().splitlines()[1].split("\t")[1:]))
+    assert {k: float(v) for k, v in fc_mq.items()} == \
+        {qc_triage.sample_name(k): float(v) for k, v in fc_main.items()}
+
     rpt = json.loads((out / "00_run_report.json").read_text())
     assert rpt["provenance"]["reference"]["saf_md5"]
     assert (out / "00_inputs/config.yaml").exists()
@@ -111,5 +128,5 @@ def test_cleanup_then_rerun_regenerates_what_it_needs(tmp_path, monkeypatch):
     assert not any(r["resumed"] for r in rep["provenance"]["reads"].values())
     assert (out / "05_counts/counts.tsv").read_text() == counts
     assert len(rep["cleanup"]) == 2
-    for f in ss.parent.glob("s*_R*.fq.gz"):                  # raw FASTQs untouched
-        assert f.stat().st_size > 0
+    raw = list(ss.parent.glob("raw*_*.fastq.gz"))
+    assert len(raw) == 8 and all(f.stat().st_size > 0 for f in raw)   # raw FASTQs untouched

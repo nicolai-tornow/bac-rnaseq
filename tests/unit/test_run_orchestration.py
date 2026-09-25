@@ -154,3 +154,16 @@ def test_count_reads_uses_a_checked_pipe(tmp_path):
     (tmp_path / "bad.fq.gz").write_bytes(b"not gzip")
     with pytest.raises(RuntimeError, match="bad.fq.gz"):
         R._count_reads(CallableRunner(FakeTools()), str(tmp_path / "bad.fq.gz"))
+
+
+def test_multiqc_config_names_raw_fastqc_by_sample(tmp_path):
+    import yaml
+    from engine.python.samplesheet import Sample
+    samples = [Sample("ctl1", "/d/lib7_S1_L001_R1_001.fastq.gz", "c", "/d/lib7_S1_L001_R2_001.fastq.gz"),
+               Sample("trt1", "/d/shared.fq.gz", "t"), Sample("trt2", "/d/shared.fq.gz", "t")]
+    cfg, names = R._multiqc_config(tmp_path, samples)
+    c = yaml.safe_load(cfg.read_text())
+    assert c["use_filename_as_sample_name"] == ["fastp"] and "strand_check" in c["fn_ignore_dirs"]
+    assert c["table_sample_merge"] == {"R1": "_R1", "R2": "_R2"}
+    rows = dict(l.split("\t") for l in names.read_text().splitlines())
+    assert rows == {"lib7_S1_L001_R1_001": "ctl1_R1", "lib7_S1_L001_R2_001": "ctl1_R2"}  # shared file: ambiguous

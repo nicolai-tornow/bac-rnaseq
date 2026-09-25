@@ -26,8 +26,13 @@ def fastqc_cmd(files, out_dir, threads):
     return ["fastqc", "-t", str(threads), "-o", out_dir, *files]
 
 
-def multiqc_cmd(in_dir, out_dir):
-    return ["multiqc", "-f", "-o", out_dir, in_dir]
+def multiqc_cmd(in_dir, out_dir, config=None, replace_names=None):
+    cmd = ["multiqc", "-f", "-o", out_dir]
+    if config:
+        cmd += ["-c", config]
+    if replace_names:
+        cmd += ["--replace-names", replace_names]
+    return cmd + [in_dir]
 
 
 def bowtie2_cmd(index_prefix, r1, threads, r2=None):
