@@ -2,7 +2,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import yaml
@@ -11,16 +10,17 @@ from .contrasts import expand_contrasts
 from .build_refs import build_bundle, md5
 from . import commands as C
 from . import qc_triage, run_report, siteconfig
+from .procs import ProcRunner, as_runner
 
 STRANDS = ("reverse", "forward", "unstranded")
 CORES_PER_SAMPLE = 8      # default split of the thread budget across parallel samples
 SORT_MEM = "256M"         # samtools sort memory per thread (4 x 8 threads ~ 8 GB)
 
 
-def _check(runner, cmd, **kw):
-    res = runner(cmd, capture_output=True, text=True, **kw)
-    if getattr(res, "returncode", 0) != 0:
-        raise RuntimeError(f"stage failed: {cmd[0]}\n{getattr(res, 'stderr', '')}")
+def _check(runner, cmd):
+    res = runner.run(cmd)
+    if res.returncode != 0:
+        raise RuntimeError(f"stage failed: {cmd[0]}\n{res.stderr}")
     return res
 
 
@@ -54,9 +54,11 @@ def _bundle_dir(config, work_dir) -> Path:
 
 
 def _count_reads(runner, fastq):
-    res = runner(["bash", "-c", 'gzip -cdf "$1" | wc -l', "_", str(fastq)],
-                 capture_output=True, text=True)
-    txt = (getattr(res, "stdout", "") or "").strip()
+    res = runner.pipe(["gzip", "-cdf", str(fastq)], ["wc", "-l"])
+    if res.rc1 != 0 or res.rc2 != 0:
+        raise RuntimeError(f"{fastq}: cannot be read as a (gzipped) FASTQ: "
+                           f"{(res.stderr1 or res.stderr).strip()}")
+    txt = res.stdout.strip()
     return int(txt) // 4 if txt else None
 
 
@@ -69,8 +71,7 @@ def _process_sample(s, paired, out, bundle, threads, runner):
     bam = out / "04_align" / f"{s.sample_id}.bam"
     log = out / "04_align" / f"{s.sample_id}.bowtie2.log"
     if bam.exists() and log.exists() and fjson.exists() and \
-            getattr(runner(["samtools", "quickcheck", str(bam)], capture_output=True,
-                           text=True), "returncode", 1) == 0:
+            runner.run(["samtools", "quickcheck", str(bam)]).returncode == 0:
         return {"resumed": True, **_fastp_stats(fjson)}
 
     # fastp can stop early on a truncated/corrupt input and still exit 0, so
@@ -88,9 +89,9 @@ def _process_sample(s, paired, out, bundle, threads, runner):
 
     sam = out / "04_align" / f"{s.sample_id}.sam"
     bt2 = C.bowtie2_cmd(bundle["index_prefix"], str(t1), threads, r2=str(t2) if t2 else None)
-    res = runner(bt2 + ["-S", str(sam)], capture_output=True, text=True)
-    Path(log).write_text(getattr(res, "stderr", "") or "")
-    if getattr(res, "returncode", 0) != 0:
+    res = runner.run(bt2 + ["-S", str(sam)])
+    Path(log).write_text(res.stderr)
+    if res.returncode != 0:
         raise RuntimeError(f"stage failed: bowtie2 ({s.sample_id}); see {log}")
     _check(runner, ["samtools", "sort", "-@", str(threads), "-m", SORT_MEM,
                     "-o", str(bam), str(sam)])
@@ -185,9 +186,10 @@ def _de_summary(results_dir, contrasts, padj, log2fc):
     return out
 
 
-def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=subprocess.run,
+def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
                  allow_qc_fail=False, check_files=True):
     work_dir = Path(work_dir)
+    runner = ProcRunner() if runner is None else as_runner(runner)
     out = work_dir / "out" / config.run_name
     for d in ["00_inputs", "01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align",
               "05_counts", "06_deseq", "qc"]:

@@ -126,3 +126,15 @@ def test_parallel_samples_override_and_small_budget(tmp_path, monkeypatch):
     rep = R.run_pipeline(_cfg(resources={"threads": 6}), tmp_path, tmp_path, str(ss),
                          runner=runner, check_files=False)
     assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (1, 6)
+
+
+def test_count_reads_uses_a_checked_pipe(tmp_path):
+    from engine.python.procs import CallableRunner
+    from tests.unit.fake_tools import FakeTools, write_fastq_gz
+    fq = write_fastq_gz(tmp_path / "a.fq.gz", 7)
+    tools = FakeTools()
+    assert R._count_reads(CallableRunner(tools), fq) == 7
+    assert [c[0] for c in tools.calls] == ["gzip", "wc"]
+    (tmp_path / "bad.fq.gz").write_bytes(b"not gzip")
+    with pytest.raises(RuntimeError, match="bad.fq.gz"):
+        R._count_reads(CallableRunner(FakeTools()), str(tmp_path / "bad.fq.gz"))

@@ -46,3 +46,17 @@ def test_featurecounts_single_end_omits_paired_flags():
                               strandedness="unstranded", paired=False)
     assert "-p" not in cmd and "--countReadPairs" not in cmd
     assert cmd[cmd.index("-s") + 1] == "0"
+
+
+def test_settings_lists_are_what_the_builders_use():
+    fp = c.fastp_cmd("r1", "o1", 4)
+    assert all(a in fp for a in c.FASTP_SETTINGS)
+    bt = c.bowtie2_cmd("idx", "r1", 4)
+    assert all(a in bt for a in c.BOWTIE2_SETTINGS)
+    assert c.BOWTIE2_SETTINGS == ["--sensitive", "--no-unal"]
+
+
+def test_featurecounts_tmp_dir():
+    cmd = c.featurecounts_cmd("a.saf", "fc.txt", ["s.bam"], 4, "reverse", False, tmp_dir="/t")
+    assert cmd[cmd.index("--tmpDir") + 1] == "/t"
+    assert "--tmpDir" not in c.featurecounts_cmd("a.saf", "fc.txt", ["s.bam"], 4, "reverse", False)
