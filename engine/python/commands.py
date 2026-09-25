@@ -26,12 +26,23 @@ def fastqc_cmd(files, out_dir, threads):
     return ["fastqc", "-t", str(threads), "-o", out_dir, *files]
 
 
-def multiqc_cmd(in_dir, out_dir):
-    return ["multiqc", "-f", "-o", out_dir, in_dir]
+def multiqc_cmd(in_dir, out_dir, config=None, replace_names=None):
+    cmd = ["multiqc", "-f", "-o", out_dir]
+    if config:
+        cmd += ["-c", config]
+    if replace_names:
+        cmd += ["--replace-names", replace_names]
+    return cmd + [in_dir]
 
 
-def bowtie2_cmd(index_prefix, r1, threads, r2=None):
+def bowtie2_cmd(index_prefix, r1, threads, r2=None, un=None):
+    """un: where to write reads that do not align (for PE a path with %, which bowtie2
+    replaces by 1 and 2). Output only; it does not change the alignment. Uncompressed on
+    purpose: bowtie2's wrapper writes the --un*-gz variants through an unquoted shell
+    command, which breaks on a path with a space and can write outside the run."""
     cmd = ["bowtie2", "-x", index_prefix, *BOWTIE2_SETTINGS, "--threads", str(threads)]
+    if un:
+        cmd += ["--un-conc" if r2 else "--un", un]
     if r2:
         cmd += ["-1", r1, "-2", r2]
     else:

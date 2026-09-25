@@ -11,7 +11,10 @@ right after a run or later on a finished run directory.
 1. Read `out/<run>/00_run_report.json` → `samples_qc`. For each sample it holds
    `verdict`, `reasons`, `alignment_pct`, `assigned_frac`, `nofeature_frac`,
    `ncrna_frac`, `ncrna_by_class` and `strandedness` (assigned fraction at reverse `-s 2`,
-   forward `-s 1`, unstranded `-s 0`, plus the inferred setting).
+   forward `-s 1`, unstranded `-s 0`, plus the inferred setting). A sample below 95%
+   alignment also has `unaligned`: the `reads` that did not align, their `gc_pct` and
+   `rrna_like_frac` (share aligning locally to the reference's own rRNA genes), with
+   the reads in `out/<run>/qc/unaligned/<sample>/`.
    The MultiQC report is at `out/<run>/qc/multiqc/multiqc_report.html`.
 2. Rules:
 
@@ -28,7 +31,13 @@ right after a run or later on a finished run directory.
      fall outside the annotation: unannotated RNA, contamination, or an incomplete
      GFF (check `ncrna_counts.tsv` and the NoFeatures share).
    - **Low alignment:** contamination, or a strain that differs from the reference.
-     The user decides whether to re-run with `--allow-qc-fail`.
+     Use `unaligned`: a high `rrna_like_frac` is rRNA of another organism
+     (contamination, or a contaminant's rRNA that depletion missed); a `gc_pct` far from
+     the reference genome's (*M. abscessus* 64.1%, *M. tuberculosis* 65.6%) also points
+     to contamination; unaligned reads at the reference's GC% with little rRNA point to
+     a strain or annotation difference. The user decides whether to re-run with
+     `--allow-qc-fail --reason "<their reason>"`; ask them for the reason, never write
+     one yourself.
    - **High ncRNA:** little usable mRNA depth. Use `ncrna_by_class` to tell why:
      rRNA+tRNA measures depletion efficiency, while Ms1, tmRNA and RNase P RNA are
      abundant by biology (in CF sputum they can exceed 75% of reads).

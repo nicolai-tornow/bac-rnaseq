@@ -38,3 +38,16 @@ def test_cli_run_failures_exit_cleanly(tmp_path, monkeypatch, capsys, exc, rc, t
     monkeypatch.setattr(R, "run_pipeline", boom)
     assert cli.main(_cli_env(tmp_path)) == rc
     assert text in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra,rc", [(["--allow-qc-fail"], 2), (["--reason", "x"], 2),
+                                      (["--allow-qc-fail", "--reason", "known contamination"], 0)])
+def test_cli_allow_qc_fail_needs_reason(tmp_path, monkeypatch, capsys, extra, rc):
+    seen = {}
+    monkeypatch.setattr(R, "run_pipeline",
+                        lambda *a, **k: seen.update(k) or {"status": "ok", "run_name": "t"})
+    assert cli.main(_cli_env(tmp_path) + extra) == rc
+    if rc:
+        assert "--reason" in capsys.readouterr().err and not seen
+    else:
+        assert seen["allow_qc_fail_reason"] == "known contamination"

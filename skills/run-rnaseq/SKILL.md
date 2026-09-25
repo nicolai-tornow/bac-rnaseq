@@ -18,11 +18,14 @@ per `skills/_shared/references/<harness>-tools.md`. The CLI is
    (every sample then runs single-end from `fastq_r1`).
 2. Write a config YAML and validate it together with the sample sheet:
    `bac-rnaseq validate <config.yaml> --samplesheet <tsv>`. Unknown keys are errors.
+   If the sequencing facility provided md5 checksums, add `--md5 <file>` here and to
+   `run` (or put them in `md5_r1`/`md5_r2` columns).
 3. Run: `bac-rnaseq run <config.yaml> --work-dir <dir> --samplesheet <tsv>`.
 4. Read `out/<run_name>/00_run_report.json`. **A FAIL halts the run before DESeq2**
    (`status: "qc_fail"`, exit code 1); counts and QC are still written. Explain it
    with `qc-triage`. The user fixes the cause and re-runs, or passes
-   `--allow-qc-fail` to proceed deliberately. A re-run skips samples whose completion
+   `--allow-qc-fail --reason "<the user's reason>"` to proceed deliberately. Ask the
+   user for the reason; never write one yourself. It is stored in the run report. A re-run skips samples whose completion
    marker still matches their inputs. WARN samples proceed but are flagged.
    `status: "failed"` (exit 1): `failure` in the report names the stage, sample and
    error; half-written files were removed, so fix the cause and re-run. Exit 2 with

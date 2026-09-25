@@ -7,6 +7,13 @@ from pathlib import Path
 from engine.python.procs import Result
 
 
+def write_fastq(path, n, seq="GGCCAATT", tag="u"):
+    with open(path, "w") as fh:
+        for i in range(n):
+            fh.write(f"@{tag}{i}\n{seq}\n+\n{'I' * len(seq)}\n")
+    return str(path)
+
+
 def write_fastq_gz(path, n, seq="ACGTACGTACGTACGTACGTACGTACGTACGTACGT", tag="r"):
     with gzip.open(path, "wt") as fh:
         for i in range(n):
@@ -66,6 +73,11 @@ class FakeTools:
         return Result(0)
 
     def _bowtie2(self, cmd, input):
+        if _arg(cmd, "--un-conc"):             # 3 unaligned pairs, uncompressed
+            for m in ("1", "2"):
+                write_fastq(_arg(cmd, "--un-conc").replace("%", m), 3)
+        if _arg(cmd, "--un"):
+            write_fastq(_arg(cmd, "--un"), 3)
         return Result(0, "", f"{self.align_pct:.2f}% overall alignment rate\n")
 
     def _samtools_sort(self, cmd, input):

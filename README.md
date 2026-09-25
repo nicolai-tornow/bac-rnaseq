@@ -72,7 +72,8 @@ micromamba activate bac-rnaseq
 export PATH="/path/to/bac-rnaseq/bin:$PATH"
 ```
 
-**1. Sample sheet** (tab-separated; `fastq_r2`, `replicate` and `batch` are optional):
+**1. Sample sheet** (tab-separated; `fastq_r2`, `replicate`, `batch`, `md5_r1` and
+`md5_r2` are optional):
 
 ```
 sample_id	fastq_r1	fastq_r2	condition
@@ -107,7 +108,9 @@ bac-rnaseq run config.yaml --work-dir . --samplesheet samples.tsv
 ```
 
 `validate` catches missing FASTQs, unsafe sample IDs, mixed read layouts and contrast
-levels that are not in the sample sheet, before any work starts.
+levels that are not in the sample sheet, before any work starts. With the sequencing
+facility's checksum file (`--md5 checksums.md5`, md5sum format) or `md5_r1`/`md5_r2`
+columns it also checks the raw FASTQs; `run --md5` checks them again before trimming.
 
 **4. Outputs** in `out/<run_name>/`:
 
@@ -122,6 +125,7 @@ levels that are not in the sample sheet, before any work starts.
 | `06_deseq/results/<contrast>.tsv` | DESeq2 results (`lfcShrink` normal, alpha 0.05) |
 | `06_deseq/` | Normalized counts, VST, size factors |
 | `qc/multiqc/` | MultiQC over FastQC, fastp, bowtie2 and featureCounts |
+| `qc/unaligned/<sample>/` | Reads that did not align, kept for samples below 95% alignment; their count, GC% and rRNA-like fraction are in the run report |
 | `cleanup_manifest.tsv` | Every file a clean-up deleted (path, bytes, tier, time, plugin commit) |
 
 **5. Figures and tables:** `visualize-results`, `pathway-enrichment` and
@@ -163,7 +167,7 @@ confirmed strandedness means reads fall outside the annotation, which is a WARN,
 a reason to change the strand setting.
 
 **After a FAIL:** fix the cause and run again, or accept it deliberately with
-`--allow-qc-fail`. A sample is not re-trimmed or re-aligned while its completion
+`--allow-qc-fail --reason "<why>"`; the reason is stored in the run report. A sample is not re-trimmed or re-aligned while its completion
 marker matches: same FASTQs (path, size, modification time), read layout, reference
 and trimming/alignment settings, and an unchanged BAM. A re-run after changing a
 counting or QC setting therefore only repeats counting and DESeq2.
