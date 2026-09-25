@@ -92,8 +92,12 @@ class RunLock:
             except FileExistsError:
                 status, info = lock_status(self.dir)
                 if status == "live":
-                    raise RunLocked(f"{self.dir} is in use by another run ({describe(info)}). "
-                                    f"If that run is certainly gone, delete {self.path}.")
+                    raise RunLocked(
+                        f"{self.dir} is in use by another run ({describe(info)}). Wait for "
+                        "it to finish. The lock of a run that died clears itself: at once on "
+                        f"the same host, {STALE_AFTER_S // 60} minutes after its last "
+                        "heartbeat from another host. If it persists, ask whoever started "
+                        "that run.")
                 if status == "stale":
                     cleared = info
                     self.path.unlink(missing_ok=True)
@@ -115,13 +119,18 @@ class RunLock:
                                              for k in ("host", "pid", "started"))
 
     def _beat(self):
+        # A write can fail transiently on NFS (EIO, ESTALE, ENOSPC); the thread must keep
+        # beating, or after STALE_AFTER_S another host would take the lock of a live run.
         while not self._stop.wait(self.heartbeat_s):
             if not self._ours():
                 return
             self.info["heartbeat"] = time.time()
             tmp = self.dir / f"{LOCK_NAME}.{os.getpid()}.tmp"
-            tmp.write_text(json.dumps(self.info))
-            os.replace(tmp, self.path)
+            try:
+                tmp.write_text(json.dumps(self.info))
+                os.replace(tmp, self.path)
+            except OSError:
+                continue
 
     def release(self):
         if self.info is None:

@@ -84,3 +84,31 @@ def test_unreadable_lock_judged_by_age(tmp_path):
     assert L.lock_status(tmp_path)[0] == "live"
     os.utime(p, (time.time() - 601, time.time() - 601))
     assert L.lock_status(tmp_path)[0] == "stale"
+
+
+def test_heartbeat_survives_a_write_error(tmp_path, monkeypatch):
+    lk = L.RunLock(tmp_path, heartbeat_s=0.05)
+    lk.acquire()
+    real, fails = os.replace, []
+
+    def flaky(a, b):
+        if not fails:
+            fails.append(1)
+            raise OSError(5, "Input/output error")
+        return real(a, b)
+
+    monkeypatch.setattr(L.os, "replace", flaky)
+    try:
+        hb1 = json.loads((tmp_path / L.LOCK_NAME).read_text())["heartbeat"]
+        time.sleep(0.4)
+        hb2 = json.loads((tmp_path / L.LOCK_NAME).read_text())["heartbeat"]
+        assert fails and hb2 > hb1
+    finally:
+        lk.release()
+
+
+def test_refusal_does_not_invite_deleting_the_lock(tmp_path):
+    _write_lock(tmp_path, host="otherhost", pid=1)
+    with pytest.raises(L.RunLocked) as e:
+        L.RunLock(tmp_path).acquire()
+    assert "delete" not in str(e.value).lower() and "clears itself" in str(e.value)
