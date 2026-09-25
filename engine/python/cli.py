@@ -146,6 +146,27 @@ def _export(args):
     return 0
 
 
+def _cleanup(args):
+    from . import cleanup as CL
+    p = CL.plan(args.run_dir, include_bams=args.include_bams, idle_minutes=args.idle_minutes)
+    print(CL.format_plan(p))
+    if p.refusals:
+        return 2
+    if not args.yes:
+        print("\ndry run: nothing was deleted. Run again with --yes to delete the files "
+              "marked 'delete'.")
+        return 0
+    try:
+        e = CL.execute(args.run_dir, include_bams=args.include_bams,
+                       idle_minutes=args.idle_minutes)
+    except CL.CleanupRefused as err:
+        print("\nREFUSED, nothing was deleted:\n" + "\n".join(f"  - {r}" for r in err.reasons))
+        return 2
+    print(f"\ndeleted {e['files']} files ({e['bytes'] / 1e9:.2f} GB); listed in "
+          f"{os.path.join(args.run_dir, e['manifest'])}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bac-rnaseq")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -209,6 +230,15 @@ def main(argv=None):
     ex.add_argument("--normalized")
     ex.add_argument("--vst")
     ex.set_defaults(fn=_export)
+    cl = sub.add_parser("cleanup", help="remove a finished run's regenerable intermediates "
+                        "(dry run unless --yes)")
+    cl.add_argument("run_dir", help="the run folder, out/<run_name>")
+    cl.add_argument("--include-bams", dest="include_bams", action="store_true",
+                    help="also delete BAMs and their indexes (needed for IGV and re-counting)")
+    cl.add_argument("--idle-minutes", dest="idle_minutes", type=float, default=15.0,
+                    help="refuse if any file changed this recently (default 15)")
+    cl.add_argument("--yes", action="store_true", help="delete; without it nothing is deleted")
+    cl.set_defaults(fn=_cleanup)
     args = ap.parse_args(argv)
     return args.fn(args)
 
