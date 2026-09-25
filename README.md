@@ -20,6 +20,7 @@ GNU GPL v3: see [License](#license).
 | **pathway-enrichment** | Fisher over-representation of functional categories (BH-FDR) with a bubble plot. |
 | **batch-integration** | ComBat/PCA to look at batch effects across runs (differential expression stays per batch). |
 | **export-results** | One Excel workbook: summary, per-contrast tables with gene names, normalized/VST/TPM values. |
+| **cleanup-run** | Frees disk space after a finished run: deletes trimmed reads and temp files (BAMs only on request) after a dry run and your confirmation. |
 | **report-feedback** | Files a bug report or suggestion as a GitHub issue on this repository. |
 
 You talk to the agent ("run RNAseq on these FASTQs, treated vs control"); the skills tell
@@ -121,9 +122,24 @@ levels that are not in the sample sheet, before any work starts.
 | `06_deseq/results/<contrast>.tsv` | DESeq2 results (`lfcShrink` normal, alpha 0.05) |
 | `06_deseq/` | Normalized counts, VST, size factors |
 | `qc/multiqc/` | MultiQC over FastQC, fastp, bowtie2 and featureCounts |
+| `cleanup_manifest.tsv` | Every file a clean-up deleted (path, bytes, tier, time, plugin commit) |
 
 **5. Figures and tables:** `visualize-results`, `pathway-enrichment` and
 `export-results` work on any DESeq2 result table, not only on runs made here.
+
+**6. Clean up** (optional, never automatic). Trimmed reads and BAMs take most of a
+run's space and can be regenerated from the raw FASTQs:
+
+```bash
+bac-rnaseq cleanup out/my_experiment                  # dry run: what would be deleted
+bac-rnaseq cleanup out/my_experiment --yes            # trimmed reads, SAMs, temp files
+bac-rnaseq cleanup out/my_experiment --yes --include-bams   # BAMs too
+```
+
+It refuses when the run did not finish with `status: "ok"`, while a run holds the
+folder or changed files in the last 15 minutes, and when a file to delete is a
+symlink, lies outside the run folder or is a raw FASTQ from the sample sheet. A later
+run regenerates whatever it needs.
 
 ## Quality control
 
