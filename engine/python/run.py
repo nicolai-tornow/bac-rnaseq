@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -120,9 +121,21 @@ def _fastq_id(path):
         return {"path": rp, "size": None, "mtime": None}
 
 
+@lru_cache(maxsize=1)
+def _aligner_versions() -> dict:
+    """fastp and bowtie2 version numbers (not paths): an upgrade of the shared env
+    must not mix old and new BAMs in one count matrix."""
+    out = {}
+    for tool, v in run_report.tool_versions().items():
+        if tool in ("fastp", "bowtie2"):
+            m = re.search(r"version\s+v?(\d[\w.-]*)", v or "") or re.search(r"\b(\d+\.\d+[\w.-]*)", v or "")
+            out[tool] = m.group(1) if m else v
+    return out
+
+
 def _sample_inputs(s, paired, bundle) -> dict:
     """What a sample's BAM was made from; any change makes the sample re-run."""
-    return {"fastq_r1": _fastq_id(s.fastq_r1), "fastq_r2": _fastq_id(s.fastq_r2),
+    return {"tools": _aligner_versions(), "fastq_r1": _fastq_id(s.fastq_r1), "fastq_r2": _fastq_id(s.fastq_r2),
             "paired": paired,
             "reference_fasta_md5": (bundle.get("stamp") or {}).get("fasta_md5"),
             "fastp_args": list(C.FASTP_SETTINGS), "bowtie2_args": list(C.BOWTIE2_SETTINGS)}

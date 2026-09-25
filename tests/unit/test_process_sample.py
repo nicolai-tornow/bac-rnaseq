@@ -79,8 +79,9 @@ def test_missing_bam_is_retrimmed_and_realigned(tmp_path):
     assert (out / "04_align/s1.bam").exists()
 
 
-@pytest.mark.parametrize("change", ["bam", "raw_fastq", "layout", "reference", "no_marker"])
-def test_changes_invalidate_the_marker(tmp_path, change):
+@pytest.mark.parametrize("change", ["bam", "raw_fastq", "layout", "reference", "no_marker",
+                                    "tool_version"])
+def test_changes_invalidate_the_marker(tmp_path, change, monkeypatch):
     s, out = _setup(tmp_path)
     _run(s, out, FakeTools())
     paired, bundle = True, BUNDLE
@@ -93,6 +94,8 @@ def test_changes_invalidate_the_marker(tmp_path, change):
         s, paired = Sample("s1", s.fastq_r1, "c", None), False
     elif change == "reference":
         bundle = {**BUNDLE, "stamp": {"fasta_md5": "other"}}
+    elif change == "tool_version":                      # the shared env was upgraded
+        monkeypatch.setattr(R, "_aligner_versions", lambda: {"fastp": "9.9", "bowtie2": "9.9"})
     else:
         (out / "04_align/s1.done.json").unlink()        # made by the 0.2.0 engine
     tools = FakeTools()
