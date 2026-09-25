@@ -140,3 +140,57 @@ def test_idle_minutes_zero_skips_the_recent_check(tmp_path):
     out, _ = make_run(tmp_path)
     (out / "05_counts/counts.tsv").write_text("new")
     assert CL.plan(out, idle_minutes=0).refusals == []
+
+
+def _manifest(out):
+    return (out / "cleanup_manifest.tsv").read_text().splitlines()
+
+
+def test_execute_deletes_exactly_what_the_plan_lists(tmp_path):
+    out, _ = make_run(tmp_path)
+    p = CL.plan(out)
+    expected = {str(c.path) for c in p.selected}
+    before = set(_files(tmp_path))
+    entry = CL.execute(out)
+    assert before - set(_files(tmp_path)) == expected
+    assert entry["files"] == len(expected) == 6
+    assert entry["bytes"] == sum(c.bytes for c in p.selected)
+    rows = _manifest(out)
+    assert rows[0] == "path\tbytes\ttier\ttimestamp\tplugin_commit" and len(rows) == 7
+    assert {r.split("\t")[0] for r in rows[1:]} == {str(Path(e).relative_to(out)) for e in expected}
+    rep = json.loads((out / "00_run_report.json").read_text())
+    assert rep["status"] == "ok" and rep["cleanup"][0]["files"] == 6
+    assert not (out / ".lock").exists()
+
+
+def test_second_cleanup_appends_to_manifest_and_report(tmp_path):
+    out, _ = make_run(tmp_path)
+    CL.execute(out)
+    _age(tmp_path)
+    entry = CL.execute(out, include_bams=True)
+    assert entry["files"] == 2 and "bam" in entry["tiers"]
+    rows = _manifest(out)
+    assert rows.count(rows[0]) == 1 and len(rows) == 1 + 6 + 2
+    assert len(json.loads((out / "00_run_report.json").read_text())["cleanup"]) == 2
+
+
+@pytest.mark.parametrize("case", ["qc_fail", "recent", "raw_by_path", "live_lock"])
+def test_execute_refuses_and_deletes_nothing(tmp_path, case):
+    out, _ = make_run(tmp_path, status="qc_fail" if case == "qc_fail" else "ok")
+    if case == "raw_by_path":
+        (out / "00_inputs/samplesheet.tsv").write_text(
+            f"sample_id\tfastq_r1\tcondition\ns1\t{out / '02_trimmed/s1_R1.fq.gz'}\tA\n")
+        _age(tmp_path)
+    if case == "recent":
+        (out / "05_counts/counts.tsv").write_text("new")
+    lk = RunLock(out) if case == "live_lock" else None
+    if lk:
+        lk.acquire()
+    try:
+        before = _files(tmp_path)
+        with pytest.raises(CL.CleanupRefused):
+            CL.execute(out)
+        assert _files(tmp_path) == before
+    finally:
+        if lk:
+            lk.release()

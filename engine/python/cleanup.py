@@ -7,9 +7,9 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from . import runlock
+from . import run_report, runlock
 
 # tier -> (folder, patterns, recursive)
 TIERS = {"trimmed": ("02_trimmed", ("*.fq.gz",), False),
@@ -223,3 +223,58 @@ def format_plan(p: Plan) -> str:
     if p.refusals:
         lines += ["", "REFUSED, nothing will be deleted:"] + [f"  - {r}" for r in p.refusals]
     return "\n".join(lines)
+
+
+def _append_report(run_dir, entry):
+    path = run_dir / "00_run_report.json"
+    rep = json.loads(path.read_text())
+    rep.setdefault("cleanup", []).append(entry)
+    run_report.write_report(rep, path)
+
+
+def execute(run_dir, include_bams=False, idle_minutes=IDLE_MINUTES, cwd=None) -> dict:
+    """Delete what a fresh plan lists, holding the run lock so no run can start
+    meanwhile. Every deleted file gets a manifest row; the run report gets an entry."""
+    run_dir = Path(run_dir).absolute()
+    lock = runlock.RunLock(run_dir)
+    try:
+        lock.acquire()
+    except runlock.RunLocked as e:
+        raise CleanupRefused([str(e)]) from e
+    try:
+        p = plan(run_dir, include_bams, idle_minutes, cwd=cwd, own_lock=lock.info)
+        if p.refusals:
+            raise CleanupRefused(p.refusals)
+        plugin = run_report.plugin_version()
+        stamp = datetime.now(timezone.utc).isoformat()
+        manifest = run_dir / MANIFEST
+        new = not manifest.exists()
+        deleted = freed = 0
+        error = None
+        with open(manifest, "a") as fh:
+            if new:
+                fh.write("path\tbytes\ttier\ttimestamp\tplugin_commit\n")
+            for c in p.selected:
+                rel = c.path.relative_to(run_dir)
+                try:
+                    c.path.unlink()
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    error = f"{rel}: {e}"
+                    break
+                fh.write(f"{rel}\t{c.bytes}\t{c.tier}\t{stamp}\t{plugin.get('commit') or ''}\n")
+                fh.flush()
+                deleted += 1
+                freed += c.bytes
+        entry = {"timestamp": stamp, "tiers": list(p.tiers), "files": deleted, "bytes": freed,
+                 "manifest": MANIFEST, "plugin": plugin}
+        if error:
+            entry["error"] = error
+        _append_report(run_dir, entry)
+        if error:
+            raise OSError(f"clean-up stopped at {error}; the {deleted} files deleted before "
+                          f"are listed in {MANIFEST}")
+        return entry
+    finally:
+        lock.release()

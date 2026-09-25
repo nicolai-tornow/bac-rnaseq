@@ -386,6 +386,14 @@ _STAGING = ("02_trimmed/.*.partial", "04_align/.*.partial",
 _NO_HANDLER = object()
 
 
+def _previous_cleanup(out) -> list:
+    """Clean-up history of the report this run replaces (kept across re-runs)."""
+    try:
+        return list(json.loads((out / "00_run_report.json").read_text()).get("cleanup") or [])
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
 def _sweep_staging(out) -> list[str]:
     """Remove staging folders a killed run left behind."""
     removed = []
@@ -468,7 +476,8 @@ def _write_failed_report(out, config, state, exc):
     try:
         rep = run_report.build_report(config.run_name, state["params"], {}, {}, [], {},
                                       "failed", provenance=state["provenance"],
-                                      warnings=state["warnings"], failure=failure)
+                                      warnings=state["warnings"], failure=failure,
+                                      cleanup=state["cleanup"])
         run_report.write_report(rep, out / "00_run_report.json")
     except Exception as e:           # never hide the original error
         exc.add_note(f"could not write the failed run report: {e}")
@@ -494,7 +503,8 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
     lock = RunLock(out)
     stale = lock.acquire()
     state = {"stage": "setup", "cleaned": [], "params": {}, "warnings": [],
-             "provenance": {"plugin": run_report.plugin_version()}}
+             "provenance": {"plugin": run_report.plugin_version()},
+             "cleanup": _previous_cleanup(out)}
     if stale is not None:
         state["provenance"]["stale_lock_cleared"] = stale
     prev = _install_sigterm()
@@ -617,7 +627,7 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     if failed and not allow_qc_fail:
         rep = run_report.build_report(config.run_name, params, qc, invariants, [],
                                       outputs, "qc_fail", provenance=provenance,
-                                      warnings=state["warnings"])
+                                      warnings=state["warnings"], cleanup=state["cleanup"])
         run_report.write_report(rep, out / "00_run_report.json")
         return rep
 
@@ -648,7 +658,7 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     outputs["deseq"] = "06_deseq/results"
     rep = run_report.build_report(
         config.run_name, params, qc, invariants, [c.name for c in cons], outputs, "ok",
-        provenance=provenance, warnings=state["warnings"],
+        provenance=provenance, warnings=state["warnings"], cleanup=state["cleanup"],
         de_summary=_de_summary(out / "06_deseq" / "results", cons,
                                config.thresholds.padj, config.thresholds.log2fc))
     run_report.write_report(rep, out / "00_run_report.json")
