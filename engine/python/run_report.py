@@ -47,14 +47,16 @@ def plugin_version() -> dict:
 
 
 def build_report(run_name, params, samples_qc, invariants, contrasts, outputs, status,
-                 provenance=None, de_summary=None, warnings=None, failure=None):
+                 provenance=None, de_summary=None, warnings=None, failure=None,
+                 cleanup=None):
     """status: ok | qc_fail | failed (then `failure` says where and why)."""
     rep = {"schema_version": "1.2", "run_name": run_name,
            "timestamp": datetime.now(timezone.utc).isoformat(),
            "versions": tool_versions(), "provenance": provenance or {},
            "params": params, "samples_qc": samples_qc, "invariants": invariants,
            "contrasts": contrasts, "de_summary": de_summary or {},
-           "outputs": outputs, "warnings": list(warnings or []), "status": status}
+           "outputs": outputs, "warnings": list(warnings or []),
+           "cleanup": list(cleanup or []), "status": status}
     if failure is not None:
         rep["failure"] = failure
     return rep

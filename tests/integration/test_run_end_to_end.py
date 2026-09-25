@@ -79,3 +79,37 @@ def test_full_run_on_real_reads(tmp_path, monkeypatch):
     rep2 = R.run_pipeline(cfg, tmp_path, None, ss)
     assert all(r["resumed"] for r in rep2["provenance"]["reads"].values())
     assert rep2["provenance"]["reference"]["reused"] is True
+
+
+def test_cleanup_then_rerun_regenerates_what_it_needs(tmp_path, monkeypatch):
+    """Default clean-up keeps BAMs, so a re-run resumes; with BAMs removed it re-trims
+    and re-aligns. Counts are identical every time."""
+    from engine.python import cleanup as CL
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(R, "_run_deseq2", lambda *a, **k: None)
+    ss = _split_fixture(tmp_path)
+    cfg = load_config({"run_name": "cl", "reference": {"species": "mabs"},
+                       "resources": {"threads": 8},
+                       "contrasts": {"explicit": [{"name": "B_vs_A", "numerator": "B",
+                                                   "denominator": "A"}]}})
+    out = tmp_path / "out" / "cl"
+    R.run_pipeline(cfg, tmp_path, None, ss)
+    counts = (out / "05_counts/counts.tsv").read_text()
+
+    e1 = CL.execute(out, idle_minutes=0)
+    assert e1["files"] == 8 and not list((out / "02_trimmed").glob("*.fq.gz"))
+    assert len(list((out / "04_align").glob("*.bam"))) == 4
+    rep = R.run_pipeline(cfg, tmp_path, None, ss)
+    assert rep["status"] == "ok" and all(r["resumed"] for r in rep["provenance"]["reads"].values())
+    assert (out / "05_counts/counts.tsv").read_text() == counts
+    assert rep["cleanup"][0]["files"] == 8                  # history kept across the re-run
+
+    CL.execute(out, include_bams=True, idle_minutes=0)
+    assert not list((out / "04_align").glob("*.bam"))
+    rep = R.run_pipeline(cfg, tmp_path, None, ss)
+    assert rep["status"] == "ok"
+    assert not any(r["resumed"] for r in rep["provenance"]["reads"].values())
+    assert (out / "05_counts/counts.tsv").read_text() == counts
+    assert len(rep["cleanup"]) == 2
+    for f in ss.parent.glob("s*_R*.fq.gz"):                  # raw FASTQs untouched
+        assert f.stat().st_size > 0

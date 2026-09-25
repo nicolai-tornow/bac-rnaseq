@@ -52,3 +52,41 @@ def test_doctor_does_not_overwrite_saved_threads(tmp_path):
     _bin(["doctor"], tmp_path)                      # report only
     site = (tmp_path / "xdg" / "bac-rnaseq" / "site.yaml").read_text()
     assert "threads: 7" in site
+
+
+def test_cleanup_dry_run_refusal_and_yes(tmp_path):
+    from tests.unit.test_cleanup import make_run, _files
+    out, _ = make_run(tmp_path)
+    before = _files(tmp_path)
+    dry = _bin(["cleanup", str(out)], tmp_path)
+    assert dry.returncode == 0, dry.stderr
+    assert "trimmed" in dry.stdout and "nothing was deleted" in dry.stdout
+    assert _files(tmp_path) == before
+    yes = _bin(["cleanup", str(out), "--yes"], tmp_path)
+    assert yes.returncode == 0, yes.stderr + yes.stdout
+    assert "deleted 6 files" in yes.stdout
+    assert not (out / "02_trimmed/s1_R1.fq.gz").exists() and (out / "04_align/s1.bam").exists()
+    again = _bin(["cleanup", str(out)], tmp_path)                 # manifest just written
+    assert again.returncode == 2 and "REFUSED" in again.stdout
+
+
+def test_cleanup_refused_for_unfinished_run(tmp_path):
+    from tests.unit.test_cleanup import make_run
+    out, _ = make_run(tmp_path, status="qc_fail")
+    r = _bin(["cleanup", str(out), "--yes"], tmp_path)
+    assert r.returncode == 2 and "qc_fail" in r.stdout
+    assert (out / "02_trimmed/s1_R1.fq.gz").exists()
+
+
+def test_cleanup_io_error_is_a_message_not_a_traceback(tmp_path, monkeypatch, capsys):
+    from engine.python import cleanup as CL
+    from engine.python import cli
+    from tests.unit.test_cleanup import make_run
+    out, _ = make_run(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError(13, "Permission denied")
+    monkeypatch.setattr(CL, "execute", boom)
+    assert cli.main(["cleanup", str(out), "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "Permission denied" in err and "Traceback" not in err

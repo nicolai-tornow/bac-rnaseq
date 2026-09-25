@@ -210,3 +210,15 @@ def test_work_dir_with_a_space(env, tmp_path):
     work = tmp_path / "my work"
     rep = R.run_pipeline(_cfg(), work, None, env[1], runner=FakeTools())
     assert rep["status"] == "ok" and _leftovers(work) == []
+
+
+def test_cleanup_history_survives_reruns(env):
+    _run(env, FakeTools())
+    rp = _out(env) / "00_run_report.json"
+    rep = json.loads(rp.read_text())
+    rep["cleanup"] = [{"files": 3}]
+    rp.write_text(json.dumps(rep))
+    assert _run(env, FakeTools())["cleanup"] == [{"files": 3}]
+    with pytest.raises(RuntimeError):
+        _run(env, FakeTools(fail={"Rscript": 1}))
+    assert _report(env)["cleanup"] == [{"files": 3}]

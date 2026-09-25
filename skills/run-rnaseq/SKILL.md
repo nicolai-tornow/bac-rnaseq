@@ -28,6 +28,8 @@ per `skills/_shared/references/<harness>-tools.md`. The CLI is
    error; half-written files were removed, so fix the cause and re-run. Exit 2 with
    "in use by another run": another run holds the folder; do not work around it.
    On `status: "ok"`, report the outputs and `de_summary` (DE gene counts per contrast).
+   Trimmed reads and BAMs stay in place; if the user wants the space back, offer
+   `cleanup-run` (never run it without being asked).
 
 Outputs in `out/<run_name>/`: `05_counts/counts.tsv` (GFF genes, the DESeq2 input),
 `05_counts/ncrna_counts.tsv` (structural RNAs added by the bundle),
