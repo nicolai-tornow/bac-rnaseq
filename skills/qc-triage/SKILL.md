@@ -35,5 +35,6 @@ right after a run or later on a finished run directory.
    - Always compare `ncrna_by_class` across replicates: one replicate with a much
      higher rRNA+tRNA share (e.g. 20% vs < 1%) was depleted less well, even when no
      rule fires.
-4. A re-run reuses trimmed reads and BAMs, so fixing a setting only repeats counting
-   and DESeq2.
+4. A re-run reuses each sample's BAM while its completion marker matches (same FASTQs,
+   layout, reference and trimming/alignment settings), so fixing a counting setting
+   such as strandedness only repeats counting and DESeq2.

@@ -1,6 +1,6 @@
 {
   "name": "bac-rnaseq",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Bacterial RNAseq pipeline: QC, alignment, DESeq2, visualization, enrichment. Validated for M. abscessus and M. tuberculosis; runs any bacterial genome.",
   "author": { "name": "Nicolai Tornow" },
   "homepage": "https://github.com/nicolai-tornow/bac-rnaseq",

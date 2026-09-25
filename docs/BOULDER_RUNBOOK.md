@@ -68,8 +68,7 @@ The strand-correctness gate and a full end-to-end run use the bundled read fixtu
 
 - **A sample FAILs on strandedness.** The report shows the assigned fraction at all
   three `-s` settings and which one the library supports. Set
-  `reference.strandedness` to that value and re-run. Trimmed reads and BAMs are
-  reused.
+  `reference.strandedness` to that value and re-run. BAMs are reused.
 - **Assigned fraction is low but strandedness is confirmed (WARN).** Reads fall
   outside the annotation: check `ncrna_counts.tsv`, the `Unassigned_NoFeatures`
   share and the alignment rate. Do not change strandedness.

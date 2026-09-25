@@ -94,7 +94,7 @@ contrasts:
 # optional:
 # reads: {layout: mate1_only}      # mixed single/paired-end sheet: run all from read 1
 # design: {batch_variable: batch}  # ~ batch + condition
-# resources: {threads: 32, parallel_samples: 4}   # default: one sample per 8 threads
+# resources: {threads: 32, parallel_samples: 1}   # default: one sample at a time
 # thresholds: {padj: 0.05, log2fc: 1}
 ```
 
@@ -114,6 +114,7 @@ levels that are not in the sample sheet, before any work starts.
 |---|---|
 | `00_run_report.json` | Status, per-sample QC, DE gene counts per contrast, tool versions, plugin commit, reference checksums |
 | `00_inputs/` | The config and sample sheet exactly as run |
+| `02_trimmed/`, `04_align/` | Trimmed reads, fastp reports, BAMs, bowtie2 logs, and one completion marker per sample (`<sample>.done.json`) |
 | `05_counts/counts.tsv` | Raw counts, GFF genes × samples (the DESeq2 input) |
 | `05_counts/ncrna_counts.tsv` | Counts for structural RNAs the GFF lacks (see below) |
 | `05_counts/strand_check/` | featureCounts at the two other strand settings |
@@ -145,8 +146,10 @@ confirmed strandedness means reads fall outside the annotation, which is a WARN,
 a reason to change the strand setting.
 
 **After a FAIL:** fix the cause and run again, or accept it deliberately with
-`--allow-qc-fail`. Samples whose BAM is complete are not re-trimmed or re-aligned,
-so a re-run only repeats counting and DESeq2.
+`--allow-qc-fail`. A sample is not re-trimmed or re-aligned while its completion
+marker matches: same FASTQs (path, size, modification time), read layout, reference
+and trimming/alignment settings, and an unchanged BAM. A re-run after changing a
+counting or QC setting therefore only repeats counting and DESeq2.
 
 ## Reference bundles and structural RNAs
 
@@ -186,9 +189,14 @@ location with `bac-rnaseq doctor --save-refs-root <dir>`.
   every sample single-end from read 1, so layout is not confounded with condition.
 - **Threads and parallel samples:** the budget is `resources.threads` in the config,
   else the one saved with `bac-rnaseq doctor --save-threads N`, else 4. Samples are
-  trimmed and aligned several at a time: by default one per 8 threads (32 threads →
-  4 samples × 8), or `resources.parallel_samples` / `doctor --save-parallel P`.
-  Budget about 2 GB of memory per parallel sample.
+  trimmed and aligned one at a time with the whole budget. `resources.parallel_samples`
+  / `doctor --save-parallel P` runs several at once (about 2 GB of memory each); on an
+  NFS mount the run report then warns, because the samples compete for the file server.
+- **Interrupted or failed runs:** a run holds `out/<run_name>/.lock`, so a second run
+  on the same folder is refused. A run that fails, is stopped with Ctrl-C or receives
+  SIGTERM stops every tool, removes its half-written files and writes
+  `00_run_report.json` with `status: "failed"` and the stage, sample and error. Run it
+  again to resume.
 
 ## Tests
 
