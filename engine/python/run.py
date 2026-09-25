@@ -548,12 +548,17 @@ def _write_failed_report(out, config, state, exc):
 
 
 def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
-                 allow_qc_fail=False, check_files=True, md5_manifest=None):
+                 allow_qc_fail=False, check_files=True, md5_manifest=None,
+                 allow_qc_fail_reason=None):
     """Pre-flight errors and a live lock raise without touching the run folder's
     report. Once the run holds the lock, any failure (incl. Ctrl-C and SIGTERM)
     kills running tools, removes staging, writes a `failed` report and re-raises."""
     work_dir = Path(work_dir)
     out = work_dir / "out" / config.run_name
+    reason = (allow_qc_fail_reason or "").strip() or None
+    if allow_qc_fail and not reason:
+        raise ValueError("allow_qc_fail needs a reason (why the failed QC is acceptable); "
+                         "it is stored in the run report")
     samples = apply_layout(read_samplesheet(samplesheet_path), config.reads.layout)
     paired = is_paired(samples)
     conds = [s.condition for s in samples]
@@ -578,7 +583,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
         if swept:
             state["provenance"]["stale_staging_removed"] = swept
         return _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples,
-                           paired, cons, runner, allow_qc_fail, state, md5s)
+                           paired, cons, runner, allow_qc_fail, state, md5s, reason)
     except BaseException as e:
         runner.cancel()
         state["cleaned"] += _sweep_staging(out)
@@ -590,7 +595,7 @@ def run_pipeline(config, work_dir, refs_root, samplesheet_path, runner=None,
 
 
 def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, paired, cons,
-                runner, allow_qc_fail, state, md5s=None):
+                runner, allow_qc_fail, state, md5s=None, reason=None):
     for d in ["00_inputs", "01_qc_raw", "02_trimmed", "03_qc_trimmed", "04_align",
               "05_counts", "06_deseq", "qc"]:
         (out / d).mkdir(parents=True, exist_ok=True)
@@ -599,7 +604,8 @@ def _run_stages(config, work_dir, out, refs_root, samplesheet_path, samples, pai
     par, per_sample = _parallelism(config, threads, len(samples))
     params = {"strandedness": strand, "paired": paired, "layout": config.reads.layout,
               "threads": threads, "parallel_samples": par,
-              "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail}
+              "threads_per_sample": per_sample, "allow_qc_fail": allow_qc_fail,
+              "allow_qc_fail_reason": reason if allow_qc_fail else None}
     state["params"] = params
     fs = _fs_type(out)
     if par > 1 and fs and fs.startswith("nfs"):

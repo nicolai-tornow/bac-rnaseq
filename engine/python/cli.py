@@ -89,11 +89,16 @@ def _doctor(args):
 def _run(args):
     from .procs import Terminated
     from .runlock import RunLocked
+    if args.allow_qc_fail != bool((args.reason or "").strip()):
+        print("--allow-qc-fail and --reason \"<why the failed QC is acceptable>\" go "
+              "together; the reason is stored in the run report", file=sys.stderr)
+        return 2
     cfg = load_config(args.config)
     report = os.path.join(args.work_dir, "out", cfg.run_name, "00_run_report.json")
     try:
         rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
-                                      allow_qc_fail=args.allow_qc_fail, md5_manifest=args.md5)
+                                      allow_qc_fail=args.allow_qc_fail, md5_manifest=args.md5,
+                                      allow_qc_fail_reason=args.reason)
     except RunLocked as e:
         print(f"run '{cfg.run_name}' refused: {e}", file=sys.stderr)
         return 2
@@ -214,7 +219,8 @@ def main(argv=None):
     rn.add_argument("--refs-root", default=str(PLUGIN_REFS),
                     help="source reference files (default: the plugin's refs/)")
     rn.add_argument("--allow-qc-fail", dest="allow_qc_fail", action="store_true",
-                    help="proceed to DESeq2 even if a sample FAILs QC (recorded in the run report)")
+                    help="proceed to DESeq2 even if a sample FAILs QC; needs --reason")
+    rn.add_argument("--reason", help="why the failed QC is acceptable (stored in the run report)")
     rn.add_argument("--md5", help="md5sum file of the raw FASTQs, checked before trimming")
     rn.set_defaults(fn=_run)
     vz = sub.add_parser("visualize")

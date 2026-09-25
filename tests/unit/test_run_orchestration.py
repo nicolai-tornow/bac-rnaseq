@@ -64,13 +64,22 @@ def test_qc_fail_halts_before_deseq2(tmp_path, monkeypatch):
     assert not deseq_called          # DESeq2 must NOT run on QC-failed data
 
 
-def test_allow_qc_fail_proceeds(tmp_path, monkeypatch):
+def test_allow_qc_fail_proceeds_with_a_reason(tmp_path, monkeypatch):
     qc = {"s1": {"verdict": "FAIL", "reasons": ["x"]}, "s2": {"verdict": "PASS", "reasons": []}}
     ss, runner, _, deseq_called, _ = _setup(tmp_path, monkeypatch, qc)
     rep = R.run_pipeline(_cfg(), tmp_path, tmp_path, str(ss), runner=runner,
-                         allow_qc_fail=True, check_files=False)
-    assert rep["status"] == "ok"
-    assert deseq_called
+                         allow_qc_fail=True, allow_qc_fail_reason="strain differs from reference",
+                         check_files=False)
+    assert rep["status"] == "ok" and deseq_called
+    assert rep["params"]["allow_qc_fail_reason"] == "strain differs from reference"
+
+
+def test_allow_qc_fail_without_a_reason_is_refused(tmp_path, monkeypatch):
+    ss, runner, calls, _, _ = _setup(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="reason"):
+        R.run_pipeline(_cfg(), tmp_path, tmp_path, str(ss), runner=runner,
+                       allow_qc_fail=True, allow_qc_fail_reason="  ", check_files=False)
+    assert calls == []
 
 
 def test_threads_fall_back_to_site_yaml(tmp_path, monkeypatch):
