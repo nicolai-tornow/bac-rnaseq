@@ -65,9 +65,8 @@ def _doctor(args):
              ["fastp", "fastqc", "bowtie2", "samtools", "featureCounts", "multiqc", "Rscript"]}
     print(f"cores detected: {total}; suggested budget: {sug}; "
           f"saved budget: {site.get('threads', 'none')}")
-    budget = site.get("threads") or sug
-    print(f"samples in parallel: {site.get('parallel_samples') or max(1, budget // 8)} "
-          f"({'saved' if site.get('parallel_samples') else 'default: 8 threads per sample'})")
+    print(f"samples in parallel: {site.get('parallel_samples') or 1} "
+          f"({'saved' if site.get('parallel_samples') else 'default: one sample with all threads'})")
     print(f"reference bundles: {site.get('refs_root', 'none saved (built per work dir)')}")
     for t, p in tools.items():
         print(f"  {t}: {'OK' if p else 'MISSING'}")
@@ -75,9 +74,24 @@ def _doctor(args):
 
 
 def _run(args):
+    from .procs import Terminated
+    from .runlock import RunLocked
     cfg = load_config(args.config)
-    rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
-                                  allow_qc_fail=args.allow_qc_fail)
+    report = os.path.join(args.work_dir, "out", cfg.run_name, "00_run_report.json")
+    try:
+        rep = run_module.run_pipeline(cfg, args.work_dir, args.refs_root, args.samplesheet,
+                                      allow_qc_fail=args.allow_qc_fail)
+    except RunLocked as e:
+        print(f"run '{cfg.run_name}' refused: {e}", file=sys.stderr)
+        return 2
+    except (Terminated, KeyboardInterrupt) as e:
+        print(f"run '{cfg.run_name}' stopped ({type(e).__name__}); partial files were "
+              f"removed; see {report}", file=sys.stderr)
+        return 143 if isinstance(e, Terminated) else 130
+    except Exception as e:
+        print(f"run '{cfg.run_name}' failed: {e}"
+              + (f"\n  report: {report}" if os.path.exists(report) else ""), file=sys.stderr)
+        return 1
     print(f"run '{rep.get('run_name')}': {rep.get('status')}")
     return 0 if rep.get("status") == "ok" else 1
 

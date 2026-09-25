@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -46,15 +47,23 @@ def plugin_version() -> dict:
 
 
 def build_report(run_name, params, samples_qc, invariants, contrasts, outputs, status,
-                 provenance=None, de_summary=None):
-    return {"schema_version": "1.1", "run_name": run_name,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "versions": tool_versions(), "provenance": provenance or {},
-            "params": params, "samples_qc": samples_qc, "invariants": invariants,
-            "contrasts": contrasts, "de_summary": de_summary or {},
-            "outputs": outputs, "status": status}
+                 provenance=None, de_summary=None, warnings=None, failure=None):
+    """status: ok | qc_fail | failed (then `failure` says where and why)."""
+    rep = {"schema_version": "1.2", "run_name": run_name,
+           "timestamp": datetime.now(timezone.utc).isoformat(),
+           "versions": tool_versions(), "provenance": provenance or {},
+           "params": params, "samples_qc": samples_qc, "invariants": invariants,
+           "contrasts": contrasts, "de_summary": de_summary or {},
+           "outputs": outputs, "warnings": list(warnings or []), "status": status}
+    if failure is not None:
+        rep["failure"] = failure
+    return rep
 
 
 def write_report(report, path):
-    Path(path).write_text(json.dumps(report, indent=2))
+    """Atomic: a crash mid-write never leaves a truncated report."""
+    p = Path(path)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(report, indent=2))
+    os.replace(tmp, p)
     return path

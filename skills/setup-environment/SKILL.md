@@ -21,12 +21,12 @@ The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/bac-rnaseq`; run it with the env's Python.
 
 - Run `bac-rnaseq doctor`: it detects cores, suggests a budget (leaves 1-2 free),
   shows the saved budget and checks the tools. It does not change anything.
-- Samples are trimmed and aligned several at a time. The default is one sample per
-  8 threads (a 32-thread budget runs 4 samples x 8 threads; 8 threads runs one).
-- ASK the user to confirm or override both numbers, then save them:
-  `bac-rnaseq doctor --save-threads <N> --save-parallel <P>`. Runs use them unless a
-  config sets `resources.threads` / `resources.parallel_samples`. Each parallel
-  sample's sort uses about 2 GB of memory at 8 threads.
+- Samples are trimmed and aligned one at a time with the whole budget by default.
+  Several at once only helps on a local disk; on an NFS mount the run report warns.
+- ASK the user to confirm or override the budget, then save it:
+  `bac-rnaseq doctor --save-threads <N>` (add `--save-parallel <P>` only if they want
+  several samples at once). Runs use them unless a config sets `resources.threads` /
+  `resources.parallel_samples`. Each parallel sample uses about 2 GB of memory.
 
 ## 3. Reference bundles
 

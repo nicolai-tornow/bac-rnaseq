@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 _STRAND = {"reverse": "2", "forward": "1", "unstranded": "0"}
+# Settings that change the result (the resume fingerprint compares these).
+FASTP_SETTINGS = ["--detect_adapter_for_pe", "--qualified_quality_phred", "20",
+                  "--length_required", "36"]
+BOWTIE2_SETTINGS = ["--sensitive", "--no-unal"]
 
 
 def strand_flag(strandedness: str) -> str:
@@ -8,9 +12,7 @@ def strand_flag(strandedness: str) -> str:
 
 
 def fastp_cmd(r1, out1, threads, r2=None, out2=None, json=None, html=None):
-    cmd = ["fastp", "--in1", r1, "--out1", out1, "--thread", str(threads),
-           "--detect_adapter_for_pe", "--qualified_quality_phred", "20",
-           "--length_required", "36"]
+    cmd = ["fastp", "--in1", r1, "--out1", out1, "--thread", str(threads), *FASTP_SETTINGS]
     if r2:
         cmd += ["--in2", r2, "--out2", out2]
     if json:
@@ -29,8 +31,7 @@ def multiqc_cmd(in_dir, out_dir):
 
 
 def bowtie2_cmd(index_prefix, r1, threads, r2=None):
-    cmd = ["bowtie2", "-x", index_prefix, "--sensitive", "--no-unal",
-           "--threads", str(threads)]
+    cmd = ["bowtie2", "-x", index_prefix, *BOWTIE2_SETTINGS, "--threads", str(threads)]
     if r2:
         cmd += ["-1", r1, "-2", r2]
     else:
@@ -38,9 +39,11 @@ def bowtie2_cmd(index_prefix, r1, threads, r2=None):
     return cmd
 
 
-def featurecounts_cmd(saf, out, bams, threads, strandedness, paired):
+def featurecounts_cmd(saf, out, bams, threads, strandedness, paired, tmp_dir=None):
     cmd = ["featureCounts", "-a", saf, "-F", "SAF", "-o", out,
            "-T", str(threads), "-s", strand_flag(strandedness)]
+    if tmp_dir:
+        cmd += ["--tmpDir", tmp_dir]
     if paired:
         cmd += ["-p", "--countReadPairs"]
     cmd += list(bams)

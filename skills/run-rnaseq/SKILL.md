@@ -22,8 +22,11 @@ per `skills/_shared/references/<harness>-tools.md`. The CLI is
 4. Read `out/<run_name>/00_run_report.json`. **A FAIL halts the run before DESeq2**
    (`status: "qc_fail"`, exit code 1); counts and QC are still written. Explain it
    with `qc-triage`. The user fixes the cause and re-runs, or passes
-   `--allow-qc-fail` to proceed deliberately. A re-run skips samples whose BAM is
-   already complete. WARN samples proceed but are flagged.
+   `--allow-qc-fail` to proceed deliberately. A re-run skips samples whose completion
+   marker still matches their inputs. WARN samples proceed but are flagged.
+   `status: "failed"` (exit 1): `failure` in the report names the stage, sample and
+   error; half-written files were removed, so fix the cause and re-run. Exit 2 with
+   "in use by another run": another run holds the folder; do not work around it.
    On `status: "ok"`, report the outputs and `de_summary` (DE gene counts per contrast).
 
 Outputs in `out/<run_name>/`: `05_counts/counts.tsv` (GFF genes, the DESeq2 input),

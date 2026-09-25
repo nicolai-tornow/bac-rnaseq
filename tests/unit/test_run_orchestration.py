@@ -27,8 +27,9 @@ def _setup(tmp_path, monkeypatch, qc=None, sheet=PE):
         "n_features": 4970, "seqids": ["NC_010397.1"], "fasta": "x", "gene_ids": [],
         "extra_ids": [], "structural": {}})
     monkeypatch.setattr(R, "_process_sample",
-                        lambda s, paired, out, bundle, threads, runner:
+                        lambda s, paired, out, bundle, threads, runner, **kw:
                         processed.append((s, paired, threads)) or {})
+    monkeypatch.setattr(R, "_sample_integrity", lambda *a, **k: [])   # no real outputs here
     monkeypatch.setattr(R, "_strand_check", lambda *a, **k: {})
     monkeypatch.setattr(R, "_ncrna_fracs", lambda *a, **k: {})
     monkeypatch.setattr(R, "_reshape_counts", lambda *a, **k: None)
@@ -110,12 +111,27 @@ SIX = "sample_id\tfastq_r1\tcondition\n" + "".join(
     f"s{i}\tA{i}.fq.gz\t{'7H9' if i < 3 else 'SCFM2'}\n" for i in range(6))
 
 
-def test_default_runs_one_sample_per_8_threads(tmp_path, monkeypatch):
+def test_default_runs_one_sample_at_a_time(tmp_path, monkeypatch):
     ss, runner, _, _, processed = _setup(tmp_path, monkeypatch, sheet=SIX)
     rep = R.run_pipeline(_cfg(resources={"threads": 32}), tmp_path, tmp_path, str(ss),
                          runner=runner, check_files=False)
-    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (4, 8)
-    assert {t for *_, t in processed} == {8} and len(processed) == 6
+    assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (1, 32)
+    assert {t for *_, t in processed} == {32} and len(processed) == 6
+
+
+@pytest.mark.parametrize("fs,par,warned", [("nfs", 4, True), ("nfs", 1, False),
+                                           ("ext2/ext3", 4, False)])
+def test_parallel_samples_on_nfs_warns(tmp_path, monkeypatch, fs, par, warned):
+    ss, runner, _, _, _ = _setup(tmp_path, monkeypatch, sheet=SIX)
+    monkeypatch.setattr(R, "_fs_type", lambda path: fs)
+    rep = R.run_pipeline(_cfg(resources={"threads": 32, "parallel_samples": par}), tmp_path,
+                         tmp_path, str(ss), runner=runner, check_files=False)
+    assert bool([w for w in rep["warnings"] if "NFS" in w]) is warned
+
+
+def test_fs_type_reports_the_filesystem(tmp_path):
+    assert R._fs_type(tmp_path)
+    assert R._fs_type(tmp_path / "missing") is None
 
 
 def test_parallel_samples_override_and_small_budget(tmp_path, monkeypatch):
@@ -126,3 +142,15 @@ def test_parallel_samples_override_and_small_budget(tmp_path, monkeypatch):
     rep = R.run_pipeline(_cfg(resources={"threads": 6}), tmp_path, tmp_path, str(ss),
                          runner=runner, check_files=False)
     assert (rep["params"]["parallel_samples"], rep["params"]["threads_per_sample"]) == (1, 6)
+
+
+def test_count_reads_uses_a_checked_pipe(tmp_path):
+    from engine.python.procs import CallableRunner
+    from tests.unit.fake_tools import FakeTools, write_fastq_gz
+    fq = write_fastq_gz(tmp_path / "a.fq.gz", 7)
+    tools = FakeTools()
+    assert R._count_reads(CallableRunner(tools), fq) == 7
+    assert [c[0] for c in tools.calls] == ["gzip", "wc"]
+    (tmp_path / "bad.fq.gz").write_bytes(b"not gzip")
+    with pytest.raises(RuntimeError, match="bad.fq.gz"):
+        R._count_reads(CallableRunner(FakeTools()), str(tmp_path / "bad.fq.gz"))
